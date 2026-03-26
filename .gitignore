@@ -147,6 +147,11 @@ docs/_build/
 # Local directories
 local/
 
+# Raw crawl outputs
+
+
+.gitkeep
+
 # Script output
 tmp/
 temp/
