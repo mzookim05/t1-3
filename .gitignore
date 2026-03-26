@@ -149,8 +149,8 @@ local/
 
 # Raw crawl outputs
 
-
-.gitkeep
+!/
+!/.gitkeep
 
 # Script output
 tmp/
