@@ -144,6 +144,9 @@ vendor/bundle/
 # Docs build output
 docs/_build/
 
+# Local directories
+local/
+
 # Script output
 tmp/
 temp/
