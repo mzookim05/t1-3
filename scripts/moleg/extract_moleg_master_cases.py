@@ -474,6 +474,11 @@ def looks_like_law_content_line(text):
     if not text:
         return False
 
+    # 질의가 여러 개인 사례의 소제목은 법령 조문 구조와 모양이 비슷하지만
+    # 실제 관계법령 본문이 아니므로 법령 내용 줄로 간주하면 안 된다.
+    if re.match(r"^[가-하]\.\s*질의", text):
+        return False
+
     if LAW_CONTENT_PATTERN.match(text):
         return True
 
@@ -488,7 +493,23 @@ def find_related_law_start(lines):
             continue
 
         lookahead = lines[index + 1 : index + 5]
-        if any(looks_like_law_content_line(item) for item in lookahead):
+        next_law_title_index = next(
+            (offset for offset, item in enumerate(lookahead, start=1) if looks_like_law_title_line(item)),
+            None,
+        )
+        next_law_content_index = next(
+            (offset for offset, item in enumerate(lookahead, start=1) if looks_like_law_content_line(item)),
+            None,
+        )
+
+        # 이유 문장의 마지막이 "...법", "...시행령"으로 끝나고 다음 줄에 실제 법령명이 나오는 경우가 있다.
+        # 이런 줄은 제목처럼 보여도 관계법령의 진짜 시작점이 아니므로 건너뛴다.
+        if next_law_title_index is not None and (
+            next_law_content_index is None or next_law_title_index < next_law_content_index
+        ):
+            continue
+
+        if next_law_content_index is not None:
             return index
 
     return None
@@ -574,6 +595,10 @@ def split_case_sections(case_lines, parse_notes):
                     "\n".join(tail_lines[recommendation_in_tail + 1 :])
                 )
 
+    # case_text_raw는 사례 본문 복구를 위한 중심 컬럼이지만, 완전한 단일 원문 컬럼은 아니다.
+    # 하단 각주 블록과 표 텍스트는 각각 footnotes_raw, tables_raw로 따로 보존하므로
+    # PDF 사례를 최대한 원문 그대로 다시 보려면 세 컬럼을 함께 읽는 것이 맞다.
+    # 또한 사례 시작 줄은 PDF의 번호와 안건번호를 복구용 원문으로 남기기 위해 그대로 유지한다.
     case_text_raw = normalize_joined_text("\n".join(raw_texts))
     return {
         "title_raw": title_raw,
@@ -657,6 +682,10 @@ def detect_case_boundaries_and_context(pages):
 
 
 def trim_case_end_page(pages, page_start, page_end):
+    # page_end는 다음 사례 시작 직전 페이지를 기계적으로 쓰지 않고,
+    # 실제 사례 본문이 남아 있는 마지막 페이지를 기록한다.
+    # 따라서 절 구분지, 장 표지, 빈 페이지, 발행 정보처럼 본문이 없는 페이지가 끼어 있으면
+    # page_end가 다음 사례 시작 직전 페이지보다 앞에서 끝날 수 있다.
     while page_end >= page_start:
         page_lines = pages.get(page_end, {}).get("lines", [])
         if not page_lines:
@@ -673,6 +702,9 @@ def trim_case_end_page(pages, page_start, page_end):
 
 
 def trim_case_lines(case_lines):
+    # 사례 시작 전의 장/절 제목 줄은 제거하되, 실제 사례 시작 줄은 남긴다.
+    # 이때 PDF 상에서 번호 줄과 안건번호 줄이 한 줄로 합쳐질 수 있으므로
+    # case_text_raw 첫 줄에 "1 ▶ 안건번호 ..." 같은 형태가 남는 것은 의도된 보존 결과다.
     start_index = 0
     for index, line in enumerate(case_lines):
         if is_case_start_line(line["main_text"]):
