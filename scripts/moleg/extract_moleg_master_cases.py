@@ -55,12 +55,13 @@ LAW_CONTENT_PATTERN = re.compile(
 )
 LAW_TITLE_PATTERN = re.compile(
     r"^(?:\[별표[^\]]*\]\s*)?(?:[가-힣0-9･·「」\-\(\)\[\]\"'., ]+)"
-    r"(?:법|법률|시행령|시행규칙|규칙|부칙|조례|훈령|고시|예규)"
+    r"(?:법|법률|령|시행령|시행규칙|규칙|규정|지침|부칙|조례|훈령|고시|예규)"
     r"(?:\([^)]+\))?$"
 )
 PAGE_PUBLICATION_PATTERN = re.compile(
     r"(편집\s*･\s*발행|법제처\s*법령해석총괄과|제\s*작\s*･\s*인\s*쇄|홈페\s*이\s*지)"
 )
+LAW_REFERENCE_PATTERN = re.compile(r"제\d+조(?:의\d+)?|제\d+항|별표\s*\d+")
 
 CSV_COLUMNS = [
     "case_id",
@@ -452,6 +453,15 @@ def looks_like_law_title_line(text):
         return False
 
     if text in {QUESTION_HEADING, ANSWER_HEADING, REASON_HEADING, RECOMMENDATION_HEADING}:
+        return False
+
+    # 관계법령 제목은 보통 법령명 한 줄로 떨어지는데,
+    # 이유 문장 중간에서 법령명을 언급한 문장도 끝부분만 보면 제목처럼 보일 수 있다.
+    # 조문 번호, 공포 연혁, 개정 문구가 섞인 줄은 본문 설명일 가능성이 높으므로 제목 후보에서 제외한다.
+    if LAW_REFERENCE_PATTERN.search(text):
+        return False
+
+    if "일부개정된" in text or "개정된" in text:
         return False
 
     if text.endswith("다.") or text.endswith("습니다.") or text.endswith("바,"):
