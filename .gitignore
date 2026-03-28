@@ -33,6 +33,12 @@ ehthumbs.db
 logs/
 log/
 
+# Common build directories
+build/
+dist/
+target/
+out/
+
 # Environment
 .env
 .env.local
@@ -68,8 +74,6 @@ __pycache__/
 *.pyo
 *.so
 .Python
-build/
-dist/
 .eggs/
 *.egg
 *.egg-info/
@@ -98,15 +102,10 @@ pnpm-debug.log*
 .nuxt/
 .svelte-kit/
 .parcel-cache/
-dist/
-build/
 *.tsbuildinfo
 
 # Java and Kotlin
 .gradle/
-build/
-out/
-target/
 *.class
 
 # Go
@@ -114,7 +113,6 @@ bin/
 .coverprofile
 
 # Rust
-target/
 
 # C and C++
 cmake-build-*/
@@ -138,11 +136,12 @@ vendor/
 
 # Ruby
 .bundle/
-vendor/bundle/
 *.gem
 
-# Docs build output
-docs/_build/
+# Docs
+docs/**
+!docs/.gitkeep
+!docs/README.md
 
 # Local directories
 local/
