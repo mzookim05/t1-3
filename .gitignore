@@ -140,8 +140,11 @@ vendor/
 
 # Docs
 docs/**
-!docs/.gitkeep
 !docs/README.md
+
+# Project
+project/**
+!project/README.md
 
 # Local directories
 local/
