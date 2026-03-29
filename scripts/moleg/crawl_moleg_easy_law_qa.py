@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from collections import Counter
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -81,6 +82,9 @@ BOOKS_COLUMNS = [
     "leaf_node_count",
     "qna_page_count",
     "qna_item_count",
+    "has_qna_rows",
+    "qna_status",
+    "qna_status_note",
     "crawled_at",
 ]
 QA_COLUMNS = [
@@ -100,6 +104,10 @@ QA_COLUMNS = [
     "title_subject",
     "question",
     "answer_raw",
+    "answer_raw_with_markers",
+    "answer_html_raw",
+    "answer_tables_raw",
+    "has_table",
     "view_count",
     "recommend_count",
     "related_life_areas_raw",
@@ -230,6 +238,98 @@ def clean_label(text):
 def parse_number(text):
     digits = re.sub(r"\D", "", text or "")
     return int(digits) if digits else 0
+
+
+def build_bool_literal(value):
+    # 다른 수집 스크립트와 마찬가지로 bool 컬럼은 소문자 literal로 고정해 두면
+    # CSV를 후속 정제 파이프라인에 바로 넘길 때 해석이 단순해진다.
+    return "true" if value else "false"
+
+
+def has_inline_qna_candidate(soup):
+    # 100문 100답 탭이 없어도 본문 안에 Q./A. 박스가 들어간 페이지가 있어
+    # strong 태그의 짧은 라벨 패턴으로 inline Q/A 후보만 보수적으로 감지한다.
+    has_question_label = False
+    has_answer_label = False
+
+    for strong_tag in soup.select("strong"):
+        label = clean_text(strong_tag.get_text(" ", strip=True))
+        if re.fullmatch(r"Q\s*[.．:：]?", label, flags=re.IGNORECASE):
+            has_question_label = True
+        elif re.fullmatch(r"A\s*[.．:：]?", label, flags=re.IGNORECASE):
+            has_answer_label = True
+
+        if has_question_label and has_answer_label:
+            return True
+
+    return False
+
+
+def build_qna_page_status(soup, qna_page_final_url, page_title, question_block_count, qa_row_count):
+    # book 단위 상태를 만들기 전에 leaf 페이지 하나하나가 어떤 종류였는지 기록해 두면
+    # "진짜 무문답인지 / 탭이 없는지 / 본문형 Q/A 후보인지"를 사실 기반으로 요약할 수 있다.
+    if qa_row_count > 0:
+        return "has_qna"
+    if question_block_count > 0:
+        return "qna_tab_empty_or_unparsed"
+    if has_inline_qna_candidate(soup):
+        return "inline_qna_candidate"
+    if extract_query_value(qna_page_final_url, "menuType") != "onhunqna" or "본문" in page_title:
+        return "no_qna_tab"
+    if "100문 100답" in page_title:
+        return "qna_tab_empty_or_unparsed"
+    return "no_qna_detected"
+
+
+def build_book_qna_status(leaf_node_count, qna_page_count, qna_item_count, page_status_counter):
+    # raw 단계에서는 book을 버리지 않고 남기되, 지금 파서가 본 사실을 상태값으로 요약해 두어야
+    # 나중에 0건 book과 inline Q/A 후보를 다시 추적하기 쉬워진다.
+    if leaf_node_count == 0:
+        return "no_leaf_nodes"
+    if qna_item_count > 0:
+        if qna_page_count == leaf_node_count:
+            return "has_qna_all_leaf_nodes"
+        if page_status_counter["inline_qna_candidate"] > 0:
+            return "has_qna_partial_with_inline_candidates"
+        return "has_qna_partial"
+    if page_status_counter["inline_qna_candidate"] > 0:
+        return "no_qna_inline_candidate_only"
+
+    nonempty_statuses = [
+        status
+        for status in ("no_qna_tab", "qna_tab_empty_or_unparsed", "no_qna_detected")
+        if page_status_counter[status] > 0
+    ]
+    if len(nonempty_statuses) == 1:
+        return {
+            "no_qna_tab": "no_qna_tab_all_leaf_nodes",
+            "qna_tab_empty_or_unparsed": "qna_tab_empty_or_unparsed",
+            "no_qna_detected": "no_qna_detected",
+        }[nonempty_statuses[0]]
+    if len(nonempty_statuses) > 1:
+        return "no_qna_mixed_status"
+    return "no_qna_detected"
+
+
+def build_book_qna_status_note(leaf_node_count, qna_page_count, qna_item_count, page_status_counter):
+    # 상태값만으로는 왜 그렇게 분류됐는지 바로 안 보일 수 있어
+    # leaf 수와 페이지별 상태 집계를 짧은 메모 문자열로 같이 남긴다.
+    parts = [
+        f"leaf_nodes={leaf_node_count}",
+        f"qna_pages={qna_page_count}",
+        f"qna_items={qna_item_count}",
+    ]
+    for status in (
+        "has_qna",
+        "inline_qna_candidate",
+        "no_qna_tab",
+        "qna_tab_empty_or_unparsed",
+        "no_qna_detected",
+    ):
+        count = page_status_counter[status]
+        if count > 0:
+            parts.append(f"{status}={count}")
+    return "; ".join(parts)
 
 
 def make_sha1(value):
@@ -529,7 +629,89 @@ def parse_title_block(title_block):
     }
 
 
-def parse_qna_page(html, qna_page_url, category_seq, category_name, csm_seq, book_title, ccf_no, cci_no, cnp_cls_no):
+def build_html_table_text(table):
+    # HTML 표는 본문 텍스트에 섞어 버리면 행/열 구조를 잃어버리므로
+    # 셀 경계만이라도 남도록 "A | B | C" 형태로 풀어서 별도 컬럼에 저장한다.
+    row_texts = []
+    for row in table.select("tr"):
+        cells = []
+        for cell in row.select("th, td"):
+            cell_text = clean_text(cell.get_text("\n", strip=True))
+            if cell_text:
+                cells.append(cell_text.replace("\n", " / "))
+        if cells:
+            row_texts.append(" | ".join(cells))
+    return "\n".join(row_texts)
+
+
+def build_answer_html_raw(answer_tag):
+    # raw 단계에서는 사람이 추후에 구조를 다시 해석할 수 있도록
+    # dd 전체 HTML을 함께 남겨 두는 편이 가장 안전하다.
+    return str(answer_tag) if answer_tag else ""
+
+
+def extract_answer_variants(answer_tag):
+    # 표를 단순히 떼어 내면 위치 정보가 사라지므로,
+    # 1) 표 제외 본문
+    # 2) 표 위치 마커가 남아 있는 본문
+    # 3) 표 블록 텍스트
+    # 4) 원문 HTML
+    # 을 함께 저장해 raw 단계의 정보 손실을 최소화한다.
+    answer_html_raw = build_answer_html_raw(answer_tag)
+    if not answer_html_raw:
+        return "", "", "", "", False
+
+    table_blocks = []
+
+    marker_soup = BeautifulSoup(answer_html_raw, "html.parser")
+    marker_root = marker_soup.find("dd")
+    if marker_root is None:
+        return "", "", answer_html_raw, "", False
+
+    # 본문 위치 복원을 위해 table 태그를 지우지 않고 표 순서에 대응하는 마커로 치환한다.
+    for table_index, table in enumerate(marker_root.select("table"), start=1):
+        table_text = build_html_table_text(table)
+        marker_text = f"[table {table_index}]"
+        if table_text:
+            table_blocks.append(f"{marker_text}\n{table_text}")
+        table.replace_with(f"\n{marker_text}\n")
+
+    answer_text_with_markers = clean_text(marker_root.get_text("\n", strip=True))
+
+    plain_soup = BeautifulSoup(answer_html_raw, "html.parser")
+    plain_root = plain_soup.find("dd")
+    if plain_root is None:
+        return "", answer_text_with_markers, answer_html_raw, "\n\n".join(table_blocks), bool(
+            table_blocks
+        )
+
+    # 서술형 본문만 따로 보고 싶을 때를 위해 표가 제거된 버전도 함께 남긴다.
+    for table in plain_root.select("table"):
+        table.decompose()
+
+    answer_text = clean_text(plain_root.get_text("\n", strip=True))
+    answer_tables_raw = "\n\n".join(table_blocks)
+    return (
+        answer_text,
+        answer_text_with_markers,
+        answer_html_raw,
+        answer_tables_raw,
+        bool(table_blocks),
+    )
+
+
+def parse_qna_page(
+    html,
+    qna_page_url,
+    qna_page_final_url,
+    category_seq,
+    category_name,
+    csm_seq,
+    book_title,
+    ccf_no,
+    cci_no,
+    cnp_cls_no,
+):
     # 백문백답 한 페이지에 QA가 여러 개 들어 있으므로
     # 페이지 단위가 아니라 ul.question 단위로 row를 만들어야 한다.
     soup = BeautifulSoup(html, "html.parser")
@@ -538,8 +720,9 @@ def parse_qna_page(html, qna_page_url, category_seq, category_name, csm_seq, boo
 
     qa_rows = []
     law_link_rows = []
+    question_blocks = soup.select("ul.question")
 
-    for block_index, question_block in enumerate(soup.select("ul.question"), start=1):
+    for block_index, question_block in enumerate(question_blocks, start=1):
         question_tag = question_block.select_one("li.qa dt")
         answer_tag = question_block.select_one("li.qa dd")
         if not (question_tag and answer_tag):
@@ -549,6 +732,13 @@ def parse_qna_page(html, qna_page_url, category_seq, category_name, csm_seq, boo
         # 질문/답변 블록과 별도로 찾아서 합친다.
         title_fields = parse_title_block(question_block.select_one("li.title"))
         metadata = parse_metadata_table(find_immediate_metadata_table(question_block))
+        (
+            answer_text,
+            answer_text_with_markers,
+            answer_html_raw,
+            answer_tables_raw,
+            has_table,
+        ) = extract_answer_variants(answer_tag)
 
         qa_id = make_sha1(f"{qna_page_url}#{block_index}")[:16]
         qa_row = {
@@ -567,7 +757,11 @@ def parse_qna_page(html, qna_page_url, category_seq, category_name, csm_seq, boo
             "title_book": title_fields["title_book"],
             "title_subject": title_fields["title_subject"],
             "question": clean_text(question_tag.get_text("\n", strip=True)),
-            "answer_raw": clean_text(answer_tag.get_text("\n", strip=True)),
+            "answer_raw": answer_text,
+            "answer_raw_with_markers": answer_text_with_markers,
+            "answer_html_raw": answer_html_raw,
+            "answer_tables_raw": answer_tables_raw,
+            "has_table": build_bool_literal(has_table),
             "view_count": str(title_fields["view_count"]),
             "recommend_count": str(title_fields["recommend_count"]),
             "related_life_areas_raw": metadata["related_life_areas_raw"],
@@ -598,7 +792,14 @@ def parse_qna_page(html, qna_page_url, category_seq, category_name, csm_seq, boo
                 }
             )
 
-    return qa_rows, law_link_rows
+    page_status = build_qna_page_status(
+        soup=soup,
+        qna_page_final_url=qna_page_final_url,
+        page_title=page_title,
+        question_block_count=len(question_blocks),
+        qa_row_count=len(qa_rows),
+    )
+    return qa_rows, law_link_rows, page_status
 
 
 def parse_law_page(html, law_url):
@@ -709,6 +910,7 @@ def crawl_easy_law():
 
             book_qna_page_count = 0
             book_qna_item_count = 0
+            page_status_counter = Counter()
             for leaf_node in leaf_nodes:
                 # leaf 하나가 책자 트리의 세부 설명 페이지 하나에 해당하고,
                 # 그 설명 페이지의 100문 100답 탭에서 실제 QA를 수집한다.
@@ -718,10 +920,11 @@ def crawl_easy_law():
                     cci_no=leaf_node["cci_no"],
                     cnp_cls_no=leaf_node["cnp_cls_no"],
                 )
-                qna_html, _ = fetch_html(session, qna_url, referer=book_final_url)
-                page_qa_rows, page_law_link_rows = parse_qna_page(
+                qna_html, qna_final_url = fetch_html(session, qna_url, referer=book_final_url)
+                page_qa_rows, page_law_link_rows, page_status = parse_qna_page(
                     html=qna_html,
                     qna_page_url=qna_url,
+                    qna_page_final_url=qna_final_url,
                     category_seq=category_book["category_seq"],
                     category_name=category_book["category_name"],
                     csm_seq=csm_seq,
@@ -730,6 +933,7 @@ def crawl_easy_law():
                     cci_no=leaf_node["cci_no"],
                     cnp_cls_no=leaf_node["cnp_cls_no"],
                 )
+                page_status_counter[page_status] += 1
 
                 if page_qa_rows:
                     book_qna_page_count += 1
@@ -737,6 +941,18 @@ def crawl_easy_law():
                     qa_rows.extend(page_qa_rows)
                     law_link_rows.extend(page_law_link_rows)
 
+            book_qna_status = build_book_qna_status(
+                leaf_node_count=len(leaf_nodes),
+                qna_page_count=book_qna_page_count,
+                qna_item_count=book_qna_item_count,
+                page_status_counter=page_status_counter,
+            )
+            book_qna_status_note = build_book_qna_status_note(
+                leaf_node_count=len(leaf_nodes),
+                qna_page_count=book_qna_page_count,
+                qna_item_count=book_qna_item_count,
+                page_status_counter=page_status_counter,
+            )
             book_rows.append(
                 {
                     "category_seq": category_book["category_seq"],
@@ -747,6 +963,11 @@ def crawl_easy_law():
                     "leaf_node_count": str(len(leaf_nodes)),
                     "qna_page_count": str(book_qna_page_count),
                     "qna_item_count": str(book_qna_item_count),
+                    # Q&A가 0건이어도 book 자체는 raw 인벤토리로 남겨 두고,
+                    # 상태 컬럼으로만 왜 0건인지 추적 가능하게 만든다.
+                    "has_qna_rows": build_bool_literal(book_qna_item_count > 0),
+                    "qna_status": book_qna_status,
+                    "qna_status_note": book_qna_status_note,
                     "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )

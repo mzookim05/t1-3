@@ -76,11 +76,17 @@ CSV_COLUMNS = [
     "agenda_numbers_raw",
     "title_raw",
     "case_text_raw",
+    "case_text_raw_with_markers",
     "question_raw",
+    "question_raw_with_markers",
     "answer_raw",
+    "answer_raw_with_markers",
     "reason_raw",
+    "reason_raw_with_markers",
     "related_law_raw",
+    "related_law_raw_with_markers",
     "recommendation_raw",
+    "recommendation_raw_with_markers",
     "footnotes_raw",
     "tables_raw",
     "page_start",
@@ -312,11 +318,11 @@ def build_page_lines(page_number, page):
     return grouped_lines, footnote_lines
 
 
-def build_table_text(page_number, page):
+def build_table_blocks(page_number, page):
     if not ENABLE_TABLE_EXTRACTION or not hasattr(page, "find_tables"):
         return []
 
-    table_texts = []
+    table_blocks = []
     # find_tables()는 표 감지 자체는 정상 수행하면서도, 권장 패키지 안내를 stdout으로 직접 출력한다.
     # 이 안내도 실행 로그의 일부로 읽히도록 캡처한 뒤 현재 스크립트와 같은 형식으로 다시 남긴다.
     captured_stdout = io.StringIO()
@@ -346,9 +352,18 @@ def build_table_text(page_number, page):
                 row_texts.append(" | ".join(cells))
 
         if row_texts:
-            table_texts.append(f"[page {page_number} table {table_index}]\n" + "\n".join(row_texts))
+            marker = f"[page {page_number} table {table_index}]"
+            table_blocks.append(
+                {
+                    "page": page_number,
+                    "y0": y0,
+                    "x0": x0,
+                    "marker": marker,
+                    "text": marker + "\n" + "\n".join(row_texts),
+                }
+            )
 
-    return table_texts
+    return table_blocks
 
 
 def build_page_cache(doc):
@@ -357,7 +372,7 @@ def build_page_cache(doc):
         page_number = page_index + 1
         page = doc.load_page(page_index)
         lines, footnotes = build_page_lines(page_number, page)
-        tables = build_table_text(page_number, page)
+        tables = build_table_blocks(page_number, page)
         pages[page_number] = {
             "lines": lines,
             "footnotes": footnotes,
@@ -524,82 +539,93 @@ def join_text_slice(lines, start_index, end_index, key):
     )
 
 
-def split_case_sections(case_lines, parse_notes):
-    raw_texts = [line["raw_text"] for line in case_lines]
-    main_texts = [line["main_text"] for line in case_lines]
+def split_case_sections(
+    case_lines,
+    parse_notes,
+    content_key="main_text",
+    title_key="raw_text",
+    case_text_key="raw_text",
+    record_missing_notes=True,
+):
+    # 같은 사례를 clean 본문과 marker 포함 본문 두 방식으로 모두 저장해야 하므로
+    # 경계 검출은 동일하게 하고, 어떤 텍스트를 실제 컬럼에 쓸지만 인자로 바꿔 재사용한다.
+    section_texts = [line["main_text"] for line in case_lines]
+    case_texts = [line[case_text_key] for line in case_lines if line.get(case_text_key)]
 
-    question_index = next((i for i, text in enumerate(main_texts) if text == QUESTION_HEADING), None)
-    answer_index = next((i for i, text in enumerate(main_texts) if text == ANSWER_HEADING), None)
-    reason_index = next((i for i, text in enumerate(main_texts) if text == REASON_HEADING), None)
+    question_index = next((i for i, text in enumerate(section_texts) if text == QUESTION_HEADING), None)
+    answer_index = next((i for i, text in enumerate(section_texts) if text == ANSWER_HEADING), None)
+    reason_index = next((i for i, text in enumerate(section_texts) if text == REASON_HEADING), None)
 
-    if question_index is None:
+    if record_missing_notes and question_index is None:
         parse_notes.append("질의요지 경계 미검출")
-    if answer_index is None:
+    if record_missing_notes and answer_index is None:
         parse_notes.append("회답 경계 미검출")
-    if reason_index is None:
+    if record_missing_notes and reason_index is None:
         parse_notes.append("이유 경계 미검출")
 
     title_start = 1
     title_end = question_index if question_index is not None else len(case_lines)
-    title_raw = join_text_slice(case_lines, title_start, title_end, "raw_text")
+    title_raw = join_text_slice(case_lines, title_start, title_end, title_key)
 
     question_raw = ""
     if question_index is not None and answer_index is not None and question_index < answer_index:
-        question_raw = join_text_slice(case_lines, question_index + 1, answer_index, "main_text")
+        question_raw = join_text_slice(case_lines, question_index + 1, answer_index, content_key)
 
     answer_raw = ""
     if answer_index is not None:
         answer_end = reason_index if reason_index is not None and answer_index < reason_index else len(case_lines)
-        answer_raw = join_text_slice(case_lines, answer_index + 1, answer_end, "main_text")
+        answer_raw = join_text_slice(case_lines, answer_index + 1, answer_end, content_key)
 
     reason_raw = ""
     related_law_raw = ""
     recommendation_raw = ""
 
     if reason_index is not None:
-        tail_lines = main_texts[reason_index + 1 :]
+        tail_section_texts = section_texts[reason_index + 1 :]
+        # 경계 검출 인덱스와 출력 슬라이스 인덱스가 어긋나면 안 되므로
+        # 빈 문자열도 유지한 채 같은 길이의 리스트를 만든다.
+        tail_output_texts = [line.get(content_key, "") for line in case_lines[reason_index + 1 :]]
         recommendation_in_tail = next(
-            (i for i, text in enumerate(tail_lines) if text == RECOMMENDATION_HEADING),
+            (i for i, text in enumerate(tail_section_texts) if text == RECOMMENDATION_HEADING),
             None,
         )
-        related_law_in_tail = find_related_law_start(tail_lines)
+        related_law_in_tail = find_related_law_start(tail_section_texts)
 
         if recommendation_in_tail is None and related_law_in_tail is None:
-            reason_raw = normalize_joined_text("\n".join(tail_lines))
-            if tail_lines:
+            reason_raw = normalize_joined_text("\n".join(tail_output_texts))
+            if record_missing_notes and tail_section_texts:
                 parse_notes.append("관계법령 경계 미검출")
         elif recommendation_in_tail is not None and (
             related_law_in_tail is None or recommendation_in_tail < related_law_in_tail
         ):
-            reason_raw = normalize_joined_text("\n".join(tail_lines[:recommendation_in_tail]))
-            recommendation_candidate_lines = tail_lines[recommendation_in_tail + 1 :]
-            related_law_after_recommendation = find_related_law_start(recommendation_candidate_lines)
+            reason_raw = normalize_joined_text("\n".join(tail_output_texts[:recommendation_in_tail]))
+            recommendation_candidate_sections = tail_section_texts[recommendation_in_tail + 1 :]
+            recommendation_candidate_outputs = tail_output_texts[recommendation_in_tail + 1 :]
+            related_law_after_recommendation = find_related_law_start(recommendation_candidate_sections)
             if related_law_after_recommendation is None:
-                recommendation_raw = normalize_joined_text("\n".join(recommendation_candidate_lines))
+                recommendation_raw = normalize_joined_text("\n".join(recommendation_candidate_outputs))
             else:
                 recommendation_raw = normalize_joined_text(
-                    "\n".join(recommendation_candidate_lines[:related_law_after_recommendation])
+                    "\n".join(recommendation_candidate_outputs[:related_law_after_recommendation])
                 )
                 related_law_raw = normalize_joined_text(
-                    "\n".join(recommendation_candidate_lines[related_law_after_recommendation:])
+                    "\n".join(recommendation_candidate_outputs[related_law_after_recommendation:])
                 )
         else:
-            reason_raw = normalize_joined_text("\n".join(tail_lines[:related_law_in_tail]))
+            reason_raw = normalize_joined_text("\n".join(tail_output_texts[:related_law_in_tail]))
             if recommendation_in_tail is None:
-                related_law_raw = normalize_joined_text("\n".join(tail_lines[related_law_in_tail:]))
+                related_law_raw = normalize_joined_text("\n".join(tail_output_texts[related_law_in_tail:]))
             else:
                 related_law_raw = normalize_joined_text(
-                    "\n".join(tail_lines[related_law_in_tail:recommendation_in_tail])
+                    "\n".join(tail_output_texts[related_law_in_tail:recommendation_in_tail])
                 )
                 recommendation_raw = normalize_joined_text(
-                    "\n".join(tail_lines[recommendation_in_tail + 1 :])
+                    "\n".join(tail_output_texts[recommendation_in_tail + 1 :])
                 )
 
-    # case_text_raw는 사례 본문 복구를 위한 중심 컬럼이지만, 완전한 단일 원문 컬럼은 아니다.
-    # 하단 각주 블록과 표 텍스트는 각각 footnotes_raw, tables_raw로 따로 보존하므로
-    # PDF 사례를 최대한 원문 그대로 다시 보려면 세 컬럼을 함께 읽는 것이 맞다.
-    # 또한 사례 시작 줄은 PDF의 번호와 안건번호를 복구용 원문으로 남기기 위해 그대로 유지한다.
-    case_text_raw = normalize_joined_text("\n".join(raw_texts))
+    # case_text_raw 계열은 사례 전체를 다시 읽을 수 있는 기준점이므로
+    # join 대상 텍스트 키를 바꿔 clean 버전과 marker 포함 버전을 모두 만들 수 있게 한다.
+    case_text_raw = normalize_joined_text("\n".join(case_texts))
     return {
         "title_raw": title_raw,
         "case_text_raw": case_text_raw,
@@ -614,15 +640,83 @@ def split_case_sections(case_lines, parse_notes):
 def gather_case_page_data(pages, page_start, page_end):
     case_lines = []
     footnote_lines = []
-    table_texts = []
+    table_blocks = []
 
     for page_number in range(page_start, page_end + 1):
         page_data = pages.get(page_number, {})
         case_lines.extend(page_data.get("lines", []))
         footnote_lines.extend(page_data.get("footnotes", []))
-        table_texts.extend(page_data.get("tables", []))
+        table_blocks.extend(page_data.get("tables", []))
 
-    return case_lines, footnote_lines, table_texts
+    return case_lines, footnote_lines, table_blocks
+
+
+def trim_table_blocks(table_blocks, case_lines):
+    # 사례 첫 페이지에 절 제목이나 안내 요소가 섞여 있는 경우가 있어
+    # 실제 사례 시작 줄보다 위쪽에 있는 표는 현재 사례 표로 간주하지 않는다.
+    if not case_lines:
+        return table_blocks
+
+    first_line = case_lines[0]
+    trimmed_blocks = []
+    for table_block in table_blocks:
+        if table_block["page"] != first_line["page"] or table_block["y0"] >= first_line["y0"]:
+            trimmed_blocks.append(table_block)
+
+    return trimmed_blocks
+
+
+def inject_table_marker_lines(case_lines, table_blocks):
+    # 표 원문은 tables_raw에 따로 보존하되,
+    # interim에서는 표가 본문 흐름 중 어디 있었는지도 재구성 가능해야 하므로 marker line을 삽입한다.
+    merged_lines = list(case_lines)
+    for table_block in table_blocks:
+        merged_lines.append(
+            {
+                "page": table_block["page"],
+                "y0": table_block["y0"],
+                "x0": table_block["x0"],
+                "raw_text": table_block["marker"],
+                "main_text": table_block["marker"],
+            }
+        )
+
+    return sorted(merged_lines, key=lambda item: (item["page"], item["y0"], item["x0"]))
+
+
+def build_footnotes_raw(footnote_lines):
+    # 각주 내용만 이어 붙이면 어느 페이지 각주인지 흐려져서
+    # 본문 속 인라인 표식과 연결하기 어려우므로 페이지 marker를 같이 남긴다.
+    if not footnote_lines:
+        return ""
+
+    page_blocks = []
+    current_page = None
+    current_lines = []
+
+    for item in footnote_lines:
+        if item["page"] != current_page:
+            if current_lines:
+                page_blocks.append(
+                    f"[page {current_page} footnotes]\n" + "\n".join(current_lines)
+                )
+            current_page = item["page"]
+            current_lines = []
+
+        if item["text"]:
+            current_lines.append(item["text"])
+
+    if current_lines:
+        page_blocks.append(f"[page {current_page} footnotes]\n" + "\n".join(current_lines))
+
+    return normalize_joined_text("\n\n".join(page_blocks))
+
+
+def build_tables_raw(table_blocks):
+    if not table_blocks:
+        return ""
+
+    return normalize_joined_text("\n\n".join(item["text"] for item in table_blocks if item["text"]))
 
 
 def build_bool_literal(value):
@@ -730,8 +824,10 @@ def assemble_case_rows(doc, pages):
         page_end = trim_case_end_page(pages, page_start, page_end)
 
         parse_notes = []
-        case_lines, footnote_lines, table_texts = gather_case_page_data(pages, page_start, page_end)
+        case_lines, footnote_lines, table_blocks = gather_case_page_data(pages, page_start, page_end)
         case_lines = trim_case_lines(case_lines)
+        table_blocks = trim_table_blocks(table_blocks, case_lines)
+        case_lines_with_markers = inject_table_marker_lines(case_lines, table_blocks)
         case_start_line = next((line for line in case_lines if is_case_start_line(line["main_text"])), None)
         if not case_start_line:
             parse_notes.append("사례 시작 줄 미검출")
@@ -740,19 +836,25 @@ def assemble_case_rows(doc, pages):
             _, agenda_numbers_raw = parse_case_start_line(case_start_line["main_text"])
 
         sections = split_case_sections(case_lines, parse_notes)
+        sections_with_markers = split_case_sections(
+            case_lines_with_markers,
+            parse_notes,
+            content_key="raw_text",
+            title_key="raw_text",
+            case_text_key="raw_text",
+            record_missing_notes=False,
+        )
 
         # 각주와 표는 1차 단계에서 완전 구조화보다 원문 보존이 우선이다.
-        # 각주는 본문에서 분리한 하단 블록을 그대로 모아 footnotes_raw에 저장하고,
-        # 표는 표 감지 결과를 셀 텍스트 블록으로 풀어 tables_raw에 넣어 후속 정제에서 다시 다듬을 수 있게 한다.
-        footnotes_raw = normalize_joined_text(
-            "\n".join(item["text"] for item in footnote_lines if item["text"])
-        )
-        tables_raw = normalize_joined_text("\n\n".join(table_texts))
+        # 각주는 페이지 marker와 함께 보존하고,
+        # 표는 marker line을 본문에 재삽입한 상태와 표 본문 텍스트를 함께 남긴다.
+        footnotes_raw = build_footnotes_raw(footnote_lines)
+        tables_raw = build_tables_raw(table_blocks)
 
         if not boundary["section_no"] and not boundary["section_title"]:
             parse_notes.append("절 없음")
-        if table_texts:
-            parse_notes.append("표 텍스트는 보조 추출 결과")
+        if table_blocks:
+            parse_notes.append("표 marker line 및 보조 추출 결과 저장")
 
         row = {
             "case_id": f"C{case_index:04d}",
@@ -767,11 +869,17 @@ def assemble_case_rows(doc, pages):
             "agenda_numbers_raw": agenda_numbers_raw,
             "title_raw": sections["title_raw"],
             "case_text_raw": sections["case_text_raw"],
+            "case_text_raw_with_markers": sections_with_markers["case_text_raw"],
             "question_raw": sections["question_raw"],
+            "question_raw_with_markers": sections_with_markers["question_raw"],
             "answer_raw": sections["answer_raw"],
+            "answer_raw_with_markers": sections_with_markers["answer_raw"],
             "reason_raw": sections["reason_raw"],
+            "reason_raw_with_markers": sections_with_markers["reason_raw"],
             "related_law_raw": sections["related_law_raw"],
+            "related_law_raw_with_markers": sections_with_markers["related_law_raw"],
             "recommendation_raw": sections["recommendation_raw"],
+            "recommendation_raw_with_markers": sections_with_markers["recommendation_raw"],
             "footnotes_raw": footnotes_raw,
             "tables_raw": tables_raw,
             "page_start": str(page_start),
