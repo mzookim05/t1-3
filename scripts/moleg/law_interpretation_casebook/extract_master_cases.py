@@ -13,9 +13,22 @@ import fitz
 # 현재 단계의 목표는 최종 학습용 데이터셋이 아니라, 원문을 최대한 훼손하지 않는 1차 master CSV를 확보하는 것이다.
 # 그래서 파일 경로, 출력 파일명, 기대 사례 수 등은 실행 시점마다 바뀌는 값이 아니라 코드 내부 상수로 둔다.
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[1]
-INPUT_PDF = PROJECT_ROOT / "data" / "raw" / "moleg" / "법제처_2025_법령해석사례집(상).pdf"
-OUTPUT_DIR = PROJECT_ROOT / "data" / "interim" / "moleg"
+# source별 하위 폴더로 스크립트를 나누면서 디렉토리 깊이가 한 단계 늘어났으므로
+# 저장소 루트는 scripts/moleg/law_interpretation_casebook 기준에서 두 단계 위로 계산한다.
+PROJECT_ROOT = SCRIPT_DIR.parents[2]
+# 법제처 사례집 원본은 생활법령 raw와 분리해 두어야 source 단위가 덜 섞이므로
+# moleg 아래에서도 별도 casebook 폴더를 기준 경로로 고정한다.
+INPUT_PDF = (
+    PROJECT_ROOT
+    / "data"
+    / "raw"
+    / "moleg"
+    / "law_interpretation_casebook"
+    / "법제처_2025_법령해석사례집(상).pdf"
+)
+# interim도 raw와 같은 기준으로 source 폴더를 나눠 두어야
+# 같은 기관 안에서 생활법령 가공본과 사례집 가공본이 섞이지 않는다.
+OUTPUT_DIR = PROJECT_ROOT / "data" / "interim" / "moleg" / "law_interpretation_casebook"
 OUTPUT_CSV = OUTPUT_DIR / "moleg_master_cases.csv"
 EXPECTED_CASE_COUNT = 148
 

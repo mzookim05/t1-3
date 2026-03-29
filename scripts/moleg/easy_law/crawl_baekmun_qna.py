@@ -1,72 +1,54 @@
-import csv
-import hashlib
-import logging
-import os
 import re
 import time
 from collections import Counter
-from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+
+from common import (
+    CATEGORY_NAME_BY_SEQ,
+    CATEGORY_SEQS,
+    EASYLAW_BASE_URL,
+    LAW_BASE_URL,
+    LAW_URL_PREFIXES,
+    PROJECT_ROOT,
+    build_bool_literal,
+    build_session,
+    canonicalize_url,
+    clean_label,
+    clean_text,
+    configure_logging,
+    extract_query_value,
+    fetch_html,
+    log_info,
+    log_warning,
+    make_sha1,
+    parse_category_page,
+    parse_leaf_nodes,
+    parse_number,
+    write_csv,
+)
 
 
 # 이 스크립트는 인자를 받지 않고 바로 실행하는 형태로 고정한다.
-# 현재 목표는 책자형 생활법령 -> 백문백답 -> 관련법령 링크를 따라가며
-# 원문 사이트에서 바로 받은 1차 수집본을 확보하는 것이다.
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[1]
-
-EASYLAW_BASE_URL = "https://www.easylaw.go.kr"
-LAW_BASE_URL = "https://www.law.go.kr"
-CATEGORY_URL_TEMPLATE = (
-    EASYLAW_BASE_URL + "/CSP/CsmSortRetrieveLst.laf?sortType=cate&csmAstSeq={category_seq}"
-)
-BOOK_URL_TEMPLATE = EASYLAW_BASE_URL + "/CSP/CsmMain.laf?csmSeq={csm_seq}"
+# 다만 공통 유틸과 책자 탐색부는 common.py로 분리해
+# 현재 파일은 백문백답 수집 로직만 담당하게 만든다.
 QNA_URL_TEMPLATE = (
     EASYLAW_BASE_URL
     + "/CSP/CnpClsMain.laf?popMenu=ov&csmSeq={csm_seq}&ccfNo={ccf_no}"
     + "&cciNo={cci_no}&cnpClsNo={cnp_cls_no}&menuType=onhunqna"
 )
-LAW_URL_PREFIXES = ("http://www.law.go.kr", "https://www.law.go.kr", "/LSW/")
 
-OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "moleg"
-BOOKS_OUTPUT_CSV = OUTPUT_DIR / "moleg_easy_law_books.csv"
-QA_OUTPUT_CSV = OUTPUT_DIR / "moleg_easy_law_qa.csv"
-QA_LAW_LINKS_OUTPUT_CSV = OUTPUT_DIR / "moleg_easy_law_qa_law_links.csv"
-LAW_PAGES_OUTPUT_CSV = OUTPUT_DIR / "moleg_easy_law_law_pages.csv"
-
-REQUEST_TIMEOUT = 30
-REQUEST_RETRY_TOTAL = 5
-REQUEST_BACKOFF_FACTOR = 1.0
-REQUEST_SLEEP_SECONDS = 0.15
+# 같은 기관 데이터라도 원천 서비스가 달라지면 raw 디렉토리에서 쉽게 섞이므로
+# 백문백답도 source별 상태 파일과 관련법령 본문 파일 규칙을 함께 맞춘다.
+OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "moleg" / "easy_law"
+BOOKS_OUTPUT_CSV = OUTPUT_DIR / "baekmun_books.csv"
+QA_OUTPUT_CSV = OUTPUT_DIR / "baekmun_qna.csv"
+QA_LAW_LINKS_OUTPUT_CSV = OUTPUT_DIR / "baekmun_qna_law_links.csv"
+LAW_PAGES_OUTPUT_CSV = OUTPUT_DIR / "baekmun_law_pages.csv"
 
 # 운영 범위는 코드 내부 상수로만 제어한다.
-# 디버깅할 때는 CATEGORY_SEQS를 (1,)처럼 줄여서 시작하면 된다.
-CATEGORY_SEQS = tuple(range(1, 19))
-CATEGORY_NAME_BY_SEQ = {
-    1: "가정법률",
-    2: "아동·청소년/교육",
-    3: "부동산/임대",
-    4: "금융/금전",
-    5: "사업",
-    6: "창업",
-    7: "무역/출입국",
-    8: "소비자",
-    9: "문화/여가생활",
-    10: "민형사/소송",
-    11: "교통/운전",
-    12: "근로/노동",
-    13: "복지",
-    14: "국방/보훈",
-    15: "정보통신/기술",
-    16: "환경/에너지",
-    17: "사회안전/범죄",
-    18: "국가 및 지자체",
-}
+# 디버깅할 때는 MAX_BOOKS, MAX_LEAF_PAGES_PER_BOOK를 줄여서 시작하면 된다.
 MAX_BOOKS = None
 MAX_LEAF_PAGES_PER_BOOK = None
 # 국가법령정보센터 본문은 requests 1회 요청만으로는 빈 본문이 내려오는 경우가 있어
@@ -144,106 +126,6 @@ LAW_PAGES_COLUMNS = [
     "doc_type_param",
     "crawled_at",
 ]
-
-LOGGER = logging.getLogger("moleg_easy_law_crawler")
-
-
-def configure_logging():
-    # 다른 수집 스크립트와 같은 형식으로 남겨야 진행 상황을 한 눈에 비교하기 쉽다.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-
-def log_info(tag, message):
-    LOGGER.info("[%s] %s", tag, message)
-
-
-def log_warning(tag, message):
-    LOGGER.warning("[%s] %s", tag, message)
-
-
-def build_temp_output_path(output_path):
-    # 최종 CSV를 바로 덮어쓰지 않고 임시 파일을 거쳐 교체해야
-    # 중간 실패가 나도 기존 결과를 보존할 수 있다.
-    return output_path.with_suffix(output_path.suffix + ".tmp")
-
-
-def build_session():
-    # 생활법령 사이트는 서버 렌더링 HTML이므로 브라우저 자동화까지는 필요 없다.
-    # 대신 재시도와 연결 재사용을 켜서 긴 순회에서도 비교적 안정적으로 수집한다.
-    session = requests.Session()
-    retry = Retry(
-        total=REQUEST_RETRY_TOTAL,
-        connect=REQUEST_RETRY_TOTAL,
-        read=REQUEST_RETRY_TOTAL,
-        backoff_factor=REQUEST_BACKOFF_FACTOR,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET", "POST"}),
-        raise_on_status=False,
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    session.headers.update(
-        {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/136.0.0.0 Safari/537.36"
-            ),
-            "Referer": EASYLAW_BASE_URL,
-        }
-    )
-    return session
-
-
-def fetch_html(session, url, referer=None):
-    # 카테고리 -> 책자 -> 백문백답으로 따라 들어가는 구조라 referer를 넘겨 두는 편이 안전하다.
-    headers = {}
-    if referer:
-        headers["Referer"] = referer
-
-    response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    time.sleep(REQUEST_SLEEP_SECONDS)
-    return response.text, response.url
-
-
-def clean_text(text):
-    # 저장 단계에서는 원문을 최대한 보존하되, CSV를 망가뜨리는 과한 공백만 정리한다.
-    if text is None:
-        return ""
-
-    text = text.replace("\xa0", " ")
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    cleaned_lines = []
-    for line in text.split("\n"):
-        normalized = re.sub(r"[ \t]+", " ", line).strip()
-        if normalized:
-            cleaned_lines.append(normalized)
-
-    text = "\n".join(cleaned_lines)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def clean_label(text):
-    return clean_text(text).rstrip(":").strip()
-
-
-def parse_number(text):
-    digits = re.sub(r"\D", "", text or "")
-    return int(digits) if digits else 0
-
-
-def build_bool_literal(value):
-    # 다른 수집 스크립트와 마찬가지로 bool 컬럼은 소문자 literal로 고정해 두면
-    # CSV를 후속 정제 파이프라인에 바로 넘길 때 해석이 단순해진다.
-    return "true" if value else "false"
 
 
 def has_inline_qna_candidate(soup):
@@ -330,132 +212,6 @@ def build_book_qna_status_note(leaf_node_count, qna_page_count, qna_item_count, 
         if count > 0:
             parts.append(f"{status}={count}")
     return "; ".join(parts)
-
-
-def make_sha1(value):
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()
-
-
-def canonicalize_url(url, default_base):
-    # 같은 페이지가 쿼리 순서만 다른 URL로 중복 저장되지 않도록
-    # 절대경로화 + 쿼리 정렬까지 같이 처리한다.
-    absolute_url = urljoin(default_base, url)
-    split_result = urlsplit(absolute_url)
-    query_pairs = parse_qs(split_result.query, keep_blank_values=True)
-    flattened_pairs = []
-    for key in sorted(query_pairs):
-        for value in sorted(query_pairs[key]):
-            flattened_pairs.append((key, value))
-    canonical_query = urlencode(flattened_pairs, doseq=True)
-    return urlunsplit(
-        (
-            split_result.scheme,
-            split_result.netloc,
-            split_result.path,
-            canonical_query,
-            "",
-        )
-    )
-
-
-def extract_query_value(url, key):
-    query = parse_qs(urlsplit(url).query)
-    values = query.get(key, [])
-    return values[0] if values else ""
-
-
-def parse_category_name(soup):
-    # 카테고리 페이지 상단의 현재 분야명을 먼저 읽고,
-    # 실패하면 아래 fallback 사전을 사용한다.
-    current_heading = soup.select_one("div.real h5 span")
-    if current_heading:
-        return clean_text(current_heading.get_text(" ", strip=True))
-    return ""
-
-
-def parse_csm_seq(url):
-    return extract_query_value(url, "csmSeq")
-
-
-def parse_category_page(session, category_seq):
-    # 18개 상위 분야 페이지에서 책자형 생활법령 목록만 먼저 모은다.
-    # 여기 단계에서는 csmSeq와 책자 제목만 안정적으로 확보하면 충분하다.
-    url = CATEGORY_URL_TEMPLATE.format(category_seq=category_seq)
-    html, final_url = fetch_html(session, url)
-    soup = BeautifulSoup(html, "html.parser")
-    category_name = parse_category_name(soup) or CATEGORY_NAME_BY_SEQ.get(category_seq, "")
-    rows = []
-
-    for item in soup.select("ul.ganaList li"):
-        anchor = item.select_one("a[href]")
-        if not anchor:
-            continue
-
-        book_url = canonicalize_url(anchor["href"], EASYLAW_BASE_URL)
-        csm_seq = parse_csm_seq(book_url)
-        if not csm_seq:
-            continue
-
-        book_title = clean_text(
-            (
-                item.select_one("h6").get_text(" ", strip=True)
-                if item.select_one("h6")
-                else anchor.get_text(" ", strip=True)
-            )
-        )
-
-        rows.append(
-            {
-                "category_seq": str(category_seq),
-                "category_name": category_name,
-                "csm_seq": csm_seq,
-                "book_title": book_title,
-                "book_url": book_url,
-                "category_url": final_url,
-            }
-        )
-
-    return rows
-
-
-def parse_leaf_nodes(book_html, csm_seq):
-    # 책자 메인 페이지의 좌측 트리에서 실제 leaf만 골라야 같은 책의 하위 문답 페이지를 순회할 수 있다.
-    # menuType이 붙은 링크는 본문/백문백답/관련법령 탭 링크이므로 leaf 후보에서 제외한다.
-    soup = BeautifulSoup(book_html, "html.parser")
-    seen = {}
-
-    for node in soup.select("li[id] a[href]"):
-        href = node["href"]
-        absolute_url = canonicalize_url(href, EASYLAW_BASE_URL)
-        if "/CSP/CnpClsMain.laf" not in absolute_url:
-            continue
-
-        current_csm_seq = extract_query_value(absolute_url, "csmSeq")
-        if current_csm_seq != str(csm_seq):
-            continue
-
-        if extract_query_value(absolute_url, "menuType"):
-            continue
-
-        ccf_no = extract_query_value(absolute_url, "ccfNo")
-        cci_no = extract_query_value(absolute_url, "cciNo")
-        cnp_cls_no = extract_query_value(absolute_url, "cnpClsNo")
-        if not (ccf_no and cci_no and cnp_cls_no):
-            continue
-
-        key = (ccf_no, cci_no, cnp_cls_no)
-        if key in seen:
-            continue
-
-        seen[key] = {
-            "ccf_no": ccf_no,
-            "cci_no": cci_no,
-            "cnp_cls_no": cnp_cls_no,
-            "leaf_title": clean_text(node.get_text(" ", strip=True)),
-            "content_url": absolute_url,
-        }
-
-    return list(seen.values())
 
 
 def build_qna_url(csm_seq, ccf_no, cci_no, cnp_cls_no):
@@ -835,18 +591,6 @@ def parse_law_page(html, law_url):
     }
 
 
-def write_csv(output_path, fieldnames, rows):
-    # 카테고리 단위 checkpoint 저장을 자주 하기 때문에
-    # 이 함수는 언제든 재호출해도 안전한 원자적 쓰기 형태를 유지한다.
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = build_temp_output_path(output_path)
-    with open(temp_path, "w", newline="", encoding="utf-8-sig") as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    os.replace(temp_path, output_path)
-
-
 def flush_outputs(book_rows, qa_rows, law_link_rows, law_page_rows):
     # 디버깅 중간에도 결과를 바로 확인할 수 있도록
     # 현재까지 누적된 네 종류 산출물을 한 번에 저장한다.
@@ -856,7 +600,7 @@ def flush_outputs(book_rows, qa_rows, law_link_rows, law_page_rows):
     write_csv(LAW_PAGES_OUTPUT_CSV, LAW_PAGES_COLUMNS, law_page_rows)
 
 
-def crawl_easy_law():
+def crawl_baekmun_qna():
     configure_logging()
     session = build_session()
 
@@ -1021,4 +765,4 @@ def crawl_easy_law():
 
 
 if __name__ == "__main__":
-    crawl_easy_law()
+    crawl_baekmun_qna()
