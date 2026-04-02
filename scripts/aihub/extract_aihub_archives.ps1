@@ -228,13 +228,39 @@ function Invoke-ArchiveExtraction {
     }
 }
 
+function Get-ArchiveCommand {
+    # Windows에서는 tar.exe가 흔하고, macOS/Linux에서는 tar가 일반적이다.
+    # 둘 중 현재 환경에서 실제로 존재하는 실행 파일을 찾아 같은 추출 로직을 재사용한다.
+    foreach ($commandName in @("tar.exe", "tar")) {
+        try {
+            return Get-Command $commandName -ErrorAction Stop
+        }
+        catch {
+            continue
+        }
+    }
+
+    throw "tar 실행 파일을 찾을 수 없습니다. tar 또는 tar.exe가 PATH에 있어야 합니다."
+}
+
 $resolvedRoot = Get-NormalizedPath -Path $RootPath
 if (-not (Test-Path -LiteralPath $resolvedRoot)) {
     throw "AI Hub 루트를 찾을 수 없습니다: $resolvedRoot"
 }
 
-$tarCommand = Get-Command tar.exe -ErrorAction Stop
 $archives = Get-ChildItem -LiteralPath $resolvedRoot -Recurse -Filter *.zip -File | Sort-Object FullName
+Write-Log -Tag "START" -Message ("root={0}" -f $resolvedRoot)
+Write-Log -Tag "START" -Message ("archives={0}" -f @($archives).Count)
+
+if (@($archives).Count -eq 0) {
+    Write-Log `
+        -Tag "INFO" `
+        -Message "root 아래에서 추출할 zip 파일을 찾지 못했습니다. *.zip 파일을 넣고 다시 실행하세요."
+    Write-Log -Tag "SUMMARY" -Message "done=0 skipped=0 dryrun=0 failed=0"
+    return
+}
+
+$tarCommand = Get-ArchiveCommand
 
 $plannedArchives = @()
 foreach ($archive in $archives) {
@@ -258,11 +284,10 @@ foreach ($archive in $archives) {
 }
 
 if ($MaxArchives -gt 0) {
-    $plannedArchives = $plannedArchives | Select-Object -First $MaxArchives
+    $plannedArchives = @($plannedArchives | Select-Object -First $MaxArchives)
 }
 
-Write-Log -Tag "START" -Message ("root={0}" -f $resolvedRoot)
-Write-Log -Tag "START" -Message ("archives={0}" -f $plannedArchives.Count)
+Write-Log -Tag "PLAN" -Message ("selected_archives={0}" -f @($plannedArchives).Count)
 if ($DatasetNames.Count -gt 0) {
     Write-Log -Tag "FILTER" -Message ("dataset_patterns={0}" -f ($DatasetNames -join ", "))
 }
