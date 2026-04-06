@@ -149,6 +149,11 @@ project/**
 # Local directories
 local/
 
+# Analysis outputs
+analysis/**
+!analysis/
+!analysis/README.md
+
 # Data
 
 
