@@ -45,9 +45,10 @@ ALL_RAW_GLOB = (
     / "03.행정법 LLM 사전학습 및 Instruction Tuning 데이터"
 )
 
-# 생성 산출물은 학습셋이나 공식 상태 문서가 아니라, 재실행 가능한 분석 결과물이므로
-# 로컬 보조 폴더가 아니라 루트 'analysis' 아래에 둬서 스크립트 결과 위치를 명시적으로 맞춘다.
-OUTPUT_DIR = PROJECT_ROOT / "analysis" / "aihub"
+# 브리지 검증 결과는 실행 1회 로그가 아니라 기준선에 가까운 검산 자료이므로
+# `analysis/aihub/bridge` 아래에 고정해 두되, 실제 데이터 preview를 포함할 수 있어
+# 기본값은 로컬 비추적 산출물로 관리한다.
+OUTPUT_DIR = PROJECT_ROOT / "analysis" / "aihub" / "bridge"
 OUTPUT_STEM = "aihub_03_interpretation_bridge_v1_validation"
 OUTPUT_CSV = OUTPUT_DIR / f"{OUTPUT_STEM}.csv"
 OUTPUT_JSON = OUTPUT_DIR / f"{OUTPUT_STEM}.json"
