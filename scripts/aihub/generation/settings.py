@@ -14,8 +14,8 @@ RUN_JUDGE_LOGS_DIR = RUN_DIR / "judge_logs"
 RUN_MERGED_DIR = RUN_DIR / "merged"
 RUN_EXPORTS_DIR = RUN_DIR / "exports"
 
-INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "03_04_generation"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "03_04_generation"
+INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "generation"
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "generation"
 PROMPT_DIR = SCRIPT_DIR / "prompts"
 
 SAMPLE_REGISTRY_PATH = INTERIM_DIR / f"sample_registry_{VERSION_TAG}.csv"
