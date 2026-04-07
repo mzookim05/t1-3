@@ -15,7 +15,7 @@ from common import (
     write_csv_atomic,
     write_json_atomic,
 )
-from settings import DATASET_SPECS, RUN_MANIFEST_PATH, RUN_SELECTED_SAMPLES_PATH, SAMPLE_REGISTRY_PATH
+from settings import DATASET_SPECS, RUN_MANIFEST_PATH, RUN_SELECTED_SAMPLES_PATH, SAMPLE_REGISTRY_PATH, VERSION_TAG
 
 
 def build_rows():
@@ -58,7 +58,7 @@ def build_rows():
             family_id = make_family_id(spec["doc_type_name"], info)
             # 실행 버전과 샘플 식별자를 맞춰 두면 review와 후속 비교에서
             # 어떤 런의 산출물인지 파일명만으로 바로 구분할 수 있다.
-            sample_id = f"v3_{sample_order:03d}"
+            sample_id = f"{VERSION_TAG}_{sample_order:03d}"
 
             row = {
                 "sample_id": sample_id,

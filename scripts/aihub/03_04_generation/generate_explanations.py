@@ -2,8 +2,11 @@ from common import (
     call_openai_json,
     load_jsonl,
     load_prompt,
+    normalized_text,
     render_prompt,
     snapshot_prompts,
+    split_sentences,
+    tokenize,
     utc_now_iso,
     write_jsonl_atomic,
 )
@@ -30,7 +33,52 @@ def build_evidence_text(evidence_sentences):
 def build_long_answer_block(sample, generation_variant):
     if generation_variant["include_long_answer"]:
         return f"- `long_answer`: `{sample['long_answer']}`"
-    return "- `long_answer`: 이번 `v3` ablation에서는 입력에서 제외"
+    return "- `long_answer`: 이번 ablation에서는 입력에서 제외"
+
+
+def build_law_required_terms_text(sample):
+    required_terms = sample.get("law_required_terms", [])
+    return ", ".join(required_terms) if required_terms else "없음"
+
+
+def overlap_ratio(base_text, compare_text):
+    base_tokens = set(tokenize(base_text))
+    compare_tokens = set(tokenize(compare_text))
+    if not base_tokens:
+        return 0.0
+    return len(base_tokens & compare_tokens) / len(base_tokens)
+
+
+def enforce_law_conclusion(sample, generated_explanation):
+    cleaned_explanation = normalized_text(generated_explanation)
+    if sample["doc_type_name"] != "법령_QA":
+        return cleaned_explanation
+
+    sentences = [normalized_text(sentence) for sentence in split_sentences(cleaned_explanation) if normalized_text(sentence)]
+    closing_target = normalized_text(sample.get("law_closing_target") or sample["short_answer"])
+    if not sentences:
+        return closing_target
+
+    last_sentence = sentences[-1]
+    required_terms = sample.get("law_required_terms", [])
+    missing_terms = [term for term in required_terms if term and term not in last_sentence]
+    closing_overlap = overlap_ratio(closing_target, last_sentence)
+    law_question_mode = sample.get("law_question_mode", "")
+
+    should_replace = False
+    if law_question_mode == "definition":
+        should_replace = bool(missing_terms) or closing_overlap < 0.75
+    elif law_question_mode in ("requirement", "scope"):
+        should_replace = closing_overlap < 0.65
+    else:
+        should_replace = closing_overlap < 0.60
+
+    # `v5`에서는 법령형 설명의 마지막 결론문을 short_answer 기준으로 고정해
+    # 정의형 핵심 요소가 마지막 문장에서 다시 축약되는 문제를 줄인다.
+    if should_replace:
+        sentences[-1] = closing_target
+
+    return " ".join(sentence for sentence in sentences if sentence)
 
 
 def build_messages(sample, style_name, generation_variant):
@@ -45,6 +93,10 @@ def build_messages(sample, style_name, generation_variant):
             "transformed_problem": sample["transformed_problem"],
             "short_answer": sample["short_answer"],
             "long_answer_block": build_long_answer_block(sample, generation_variant),
+            "law_question_mode": sample.get("law_question_mode", ""),
+            "law_generation_hint": sample.get("law_generation_hint", ""),
+            "law_closing_target": sample.get("law_closing_target", ""),
+            "law_required_terms": build_law_required_terms_text(sample),
             "issue": sample["evidence_card"]["issue"],
             "conclusion": sample["evidence_card"]["conclusion"],
             "rule_basis": sample["evidence_card"]["rule_basis"],
@@ -101,6 +153,7 @@ def main():
                     generated_explanation = build_local_fallback_explanation(sample, style_name, generation_variant)
                     generator_model = "local_template_fallback"
                     generation_mode = f"fallback:{str(exc)[:160]}"
+                generated_explanation = enforce_law_conclusion(sample, generated_explanation)
                 rows.append(
                     {
                         "sample_id": sample["sample_id"],

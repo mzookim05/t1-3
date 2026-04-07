@@ -1,6 +1,9 @@
 import json
+import re
 
 from common import (
+    classify_law_question,
+    is_statute_heading_only,
     lexical_overlap_score,
     load_csv_rows,
     load_json,
@@ -11,12 +14,64 @@ from common import (
 from settings import EVIDENCE_CARDS_PATH, SAMPLE_REGISTRY_PATH
 
 
-def choose_law_rows(rows, sm_class):
-    matching_indices = [index for index, row in enumerate(rows) if sm_class and sm_class in row["내용"]]
-    if matching_indices:
-        start_index = matching_indices[0]
-        return rows[start_index : start_index + 3]
-    return rows[:3]
+def find_law_start_index(rows, sm_class):
+    if sm_class:
+        for index, row in enumerate(rows):
+            text = row["내용"].strip()
+            if text.startswith(sm_class):
+                return index
+        for index, row in enumerate(rows):
+            text = row["내용"].strip()
+            if row["구분"] == "조문" and sm_class in text:
+                return index
+    return 0
+
+
+def find_next_substantive_law_index(rows, start_index):
+    for index in range(start_index + 1, min(start_index + 6, len(rows))):
+        text = rows[index]["내용"].strip()
+        if text:
+            return index
+    return None
+
+
+def choose_law_rows(rows, sm_class, law_question_mode):
+    start_index = find_law_start_index(rows, sm_class)
+    selected_rows = [rows[start_index]]
+    anchor_index = start_index
+    main_row = rows[start_index]
+
+    # 조문 제목만 잡히는 경우가 있어, `v5`부터는 바로 뒤의 실질 조문/항을 함께 담는다.
+    # `v4_001`처럼 제목만 evidence에 남으면 Grounding이 무너져도 원인을 코드에서 못 잡는다.
+    if is_statute_heading_only(main_row["내용"]):
+        next_index = find_next_substantive_law_index(rows, start_index)
+        if next_index is not None:
+            selected_rows.append(rows[next_index])
+            anchor_index = next_index
+
+    anchor_text = rows[anchor_index]["내용"]
+    include_items = (
+        law_question_mode in ("requirement", "scope")
+        or "다음 각 호" in anchor_text
+        or "다음 각 목" in anchor_text
+    )
+    if not include_items and law_question_mode == "definition":
+        return selected_rows
+
+    max_item_count = 2 if include_items else 0
+    item_count = 0
+    for row in rows[anchor_index + 1 : anchor_index + 8]:
+        text = row["내용"].strip()
+        if not text:
+            continue
+        if row["구분"] in ("호", "목") and re.match(r"^(?:\d+\.|[가-하]\.)\s*", text):
+            selected_rows.append(row)
+            item_count += 1
+            if item_count >= max_item_count:
+                break
+        elif row["구분"] == "조문" and item_count > 0:
+            break
+    return selected_rows
 
 
 def choose_interpretation_rows(rows):
@@ -89,9 +144,10 @@ def build_card(record):
     label_input = record["label_input"]
     label_output = record["label_output"]
     rows = load_csv_rows(record["raw_path"])
+    law_question_mode = classify_law_question(label_input) if record["doc_type_name"] == "법령_QA" else ""
 
     if record["doc_type_name"] == "법령_QA":
-        selected = choose_law_rows(rows, info.get("smClass", "").strip())
+        selected = choose_law_rows(rows, info.get("smClass", "").strip(), law_question_mode)
     elif record["doc_type_name"] == "해석례_QA":
         selected = choose_interpretation_rows(rows)
     elif record["doc_type_name"] == "결정례_QA":
@@ -109,8 +165,11 @@ def build_card(record):
     ]
     conclusion = pick_short_answer(label_output)
     issue = label_input.rstrip(" ?")
-    rule_basis = evidence_sentences[0]["text"] if evidence_sentences else ""
-    fact_basis = " ".join(sentence["text"] for sentence in evidence_sentences[1:]).strip()
+    substantive_sentences = [
+        sentence for sentence in evidence_sentences if sentence["text"] and not is_statute_heading_only(sentence["text"])
+    ]
+    rule_basis = substantive_sentences[0]["text"] if substantive_sentences else (evidence_sentences[0]["text"] if evidence_sentences else "")
+    fact_basis = " ".join(sentence["text"] for sentence in substantive_sentences[1:]).strip()
 
     return {
         "sample_id": record["sample_id"],
@@ -125,6 +184,7 @@ def build_card(record):
         "info": info,
         "original_input": label_input,
         "label_output": label_output,
+        "law_question_mode": law_question_mode,
         "evidence_card": {
             "issue": issue,
             "conclusion": conclusion,

@@ -4,7 +4,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[2]
 
-RUN_NAME = "2026-04-07_v3_input_fix"
+VERSION_TAG = "v5"
+RUN_NAME = "2026-04-07_v5_law_refine"
 RUN_DIR = PROJECT_ROOT / "analysis" / "llm_runs" / RUN_NAME
 RUN_PROMPTS_DIR = RUN_DIR / "prompts"
 RUN_INPUTS_DIR = RUN_DIR / "inputs"
@@ -17,38 +18,38 @@ INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "03_04_generation"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "03_04_generation"
 PROMPT_DIR = SCRIPT_DIR / "prompts"
 
-SAMPLE_REGISTRY_PATH = INTERIM_DIR / "sample_registry_v3.csv"
-EVIDENCE_CARDS_PATH = INTERIM_DIR / "evidence_cards_v3.jsonl"
-TRANSFORMED_SAMPLES_PATH = INTERIM_DIR / "transformed_samples_v3.jsonl"
-JUDGE_READY_SAMPLES_PATH = INTERIM_DIR / "judge_ready_samples_v3.jsonl"
+SAMPLE_REGISTRY_PATH = INTERIM_DIR / f"sample_registry_{VERSION_TAG}.csv"
+EVIDENCE_CARDS_PATH = INTERIM_DIR / f"evidence_cards_{VERSION_TAG}.jsonl"
+TRANSFORMED_SAMPLES_PATH = INTERIM_DIR / f"transformed_samples_{VERSION_TAG}.jsonl"
+JUDGE_READY_SAMPLES_PATH = INTERIM_DIR / f"judge_ready_samples_{VERSION_TAG}.jsonl"
 
 RUN_MANIFEST_PATH = RUN_DIR / "run_manifest.json"
 RUN_SELECTED_SAMPLES_PATH = RUN_DIR / "selected_samples.csv"
-GENERATIONS_PATH = RUN_GENERATIONS_DIR / "generated_explanations_v3.jsonl"
-GROUNDING_LOG_PATH = RUN_JUDGE_LOGS_DIR / "judge_grounding_v3.jsonl"
-ANSWER_LOG_PATH = RUN_JUDGE_LOGS_DIR / "judge_answer_v3.jsonl"
-PEDAGOGY_LOG_PATH = RUN_JUDGE_LOGS_DIR / "judge_pedagogy_v3.jsonl"
-MERGED_SCORES_PATH = RUN_MERGED_DIR / "merged_judge_scores_v3.csv"
-MEETING_EXAMPLES_MD_PATH = RUN_EXPORTS_DIR / "meeting_examples_v3.md"
-MEETING_EXAMPLES_CSV_PATH = RUN_EXPORTS_DIR / "meeting_examples_v3.csv"
-ABLATION_SUMMARY_PATH = RUN_EXPORTS_DIR / "ablation_summary_v3.csv"
-MEETING_EXAMPLES_TITLE = "meeting_examples_v3"
+GENERATIONS_PATH = RUN_GENERATIONS_DIR / f"generated_explanations_{VERSION_TAG}.jsonl"
+GROUNDING_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_grounding_{VERSION_TAG}.jsonl"
+ANSWER_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_answer_{VERSION_TAG}.jsonl"
+PEDAGOGY_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_pedagogy_{VERSION_TAG}.jsonl"
+MERGED_SCORES_PATH = RUN_MERGED_DIR / f"merged_judge_scores_{VERSION_TAG}.csv"
+MEETING_EXAMPLES_MD_PATH = RUN_EXPORTS_DIR / f"meeting_examples_{VERSION_TAG}.md"
+MEETING_EXAMPLES_CSV_PATH = RUN_EXPORTS_DIR / f"meeting_examples_{VERSION_TAG}.csv"
+ABLATION_SUMMARY_PATH = RUN_EXPORTS_DIR / f"ablation_summary_{VERSION_TAG}.csv"
+MEETING_EXAMPLES_TITLE = f"meeting_examples_{VERSION_TAG}"
 
-TRAIN_PATH = PROCESSED_DIR / "train_v3.jsonl"
-DEV_PATH = PROCESSED_DIR / "dev_v3.jsonl"
-TEST_PATH = PROCESSED_DIR / "test_v3.jsonl"
-DATASET_MANIFEST_PATH = PROCESSED_DIR / "dataset_manifest_v3.csv"
+TRAIN_PATH = PROCESSED_DIR / f"train_{VERSION_TAG}.jsonl"
+DEV_PATH = PROCESSED_DIR / f"dev_{VERSION_TAG}.jsonl"
+TEST_PATH = PROCESSED_DIR / f"test_{VERSION_TAG}.jsonl"
+DATASET_MANIFEST_PATH = PROCESSED_DIR / f"dataset_manifest_{VERSION_TAG}.csv"
 
 # 비밀값이 아닌 실행 상수는 `.env`가 아니라 여기에 두어,
 # 어떤 모델과 규칙으로 실행했는지 문서와 코드가 같이 움직이게 한다.
 # 생성은 최신 mini 계열을 우선 사용하되, 호환성 문제에 대비해 안정적인
 # `gpt-4.1-mini`를 2순위로 둔다.
 GENERATOR_MODEL_CANDIDATES = ("gpt-5.4-mini", "gpt-4.1-mini")
-# 판정은 preview와 지원 중단 계열을 피하고, 현재 가격표 기준 안정적인
-# `gemini-2.5-flash`를 우선 사용한다. 비용을 더 낮춰야 할 때만 lite로 내린다.
-JUDGE_MODEL_CANDIDATES = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
+# `v4`부터는 동일 런 안에서 Judge 백본을 하나로 통일해 비교 가능성을 높였고,
+# `v5`에서도 같은 조건을 유지해 법령 보정 효과만 보게 한다.
+JUDGE_MODEL_CANDIDATES = ("gemini-2.5-flash",)
 ACTIVE_GENERATION_VARIANT = "without_long_answer"
-# `v3`에서는 `long_answer` 제거가 기본 경로이고, 포함 여부는 ablation으로만 비교한다.
+# `v5`에서도 `long_answer` 제거가 기본 경로이고, 포함 여부는 ablation으로만 비교한다.
 GENERATION_INPUT_VARIANTS = (
     {
         "name": "without_long_answer",
@@ -85,8 +86,8 @@ SCORE_WEIGHTS = {
 
 DOC_TYPE_RULES = {
     "법령_QA": {
-        "transform_type": "apply_rule",
-        "template_name": "판단 기준 -> 조문 적용 -> 결론",
+        "transform_type": "law_reframe",
+        "template_name": "정의·요건·범위 -> 조문 근거 -> 결론",
         "target_sentences": 3,
         "target_word_range": "25∼60",
         "styles": ("single",),

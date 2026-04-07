@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
@@ -155,6 +156,37 @@ def normalized_text(text):
     return re.sub(r"\s+", " ", str(text)).strip()
 
 
+def classify_law_question(original_input):
+    normalized = normalized_text(original_input)
+
+    if any(keyword in normalized for keyword in ("요건", "성립", "조건", "갖추어야", "요소")):
+        return "requirement"
+    if any(keyword in normalized for keyword in ("의미", "뜻", "정의", "일컫", "란 무엇", "무엇을 말", "말하나요")):
+        return "definition"
+    if any(keyword in normalized for keyword in ("범위", "어떤", "어느", "대상", "해당하는")):
+        return "scope"
+    return "criteria"
+
+
+def extract_law_subject(original_input):
+    question = normalized_text(original_input).rstrip("?")
+    patterns = [
+        r".+에서 일컫는 (.+?)란 무엇인가요$",
+        r"(.+?)란 무엇인가요$",
+        r"(.+?)는 무엇인가요$",
+        r"(.+?)는 어떤 .+?를 말하나요$",
+        r"(.+?)은 어떤 .+?인가요$",
+        r"(.+?)는 어떤 .+?인가요$",
+        r"(.+?)의 요건은 무엇인가요$",
+        r"(.+?)의 범위는 무엇인가요$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, question)
+        if match:
+            return normalized_text(match.group(1))
+    return question
+
+
 def split_sentences(text):
     pieces = [
         piece.strip()
@@ -234,6 +266,17 @@ def pick_long_answer(label_output):
         if len(chosen) >= 2 and total_words >= 25:
             break
     return " ".join(chosen).strip()
+
+
+def strip_statute_lead(text):
+    stripped = normalized_text(text)
+    stripped = re.sub(r"^제\d+조(?:의\d+)?\([^)]+\)\s*", "", stripped)
+    return stripped
+
+
+def is_statute_heading_only(text):
+    stripped = normalized_text(text)
+    return bool(re.fullmatch(r"제\d+조(?:의\d+)?\([^)]+\)", stripped))
 
 
 def utc_now_iso():
@@ -395,36 +438,46 @@ def call_gemini_json(prompt_text, response_label):
 
     errors = []
     for model_name in JUDGE_MODEL_CANDIDATES:
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
-            "generationConfig": {
-                "temperature": JUDGE_TEMPERATURE,
-                "responseMimeType": "application/json",
-            },
-        }
-        req = request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload).encode("utf-8"),
-        )
-        try:
-            with request.urlopen(req, timeout=120) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
-            parts = response_payload["candidates"][0]["content"]["parts"]
-            content_text = "".join(part.get("text", "") for part in parts)
-            parsed = safe_parse_json(content_text)
-            error_tags = parsed.get("error_tags", [])
-            parsed["error_tags"] = [tag for tag in error_tags if tag in ALLOWED_ERROR_TAGS]
-            return {
-                "model": model_name,
-                "response_label": response_label,
-                "payload": response_payload,
-                "json": parsed,
+        for attempt in range(4):
+            payload = {
+                "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
+                "generationConfig": {
+                    "temperature": JUDGE_TEMPERATURE,
+                    "responseMimeType": "application/json",
+                },
             }
-        except error.HTTPError as exc:
-            errors.append({"model": model_name, "status_code": exc.code, "text": exc.read().decode("utf-8", errors="ignore")[:400]})
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"model": model_name, "status_code": "client_error", "text": str(exc)[:400]})
+            req = request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(payload).encode("utf-8"),
+            )
+            try:
+                with request.urlopen(req, timeout=120) as response:
+                    response_payload = json.loads(response.read().decode("utf-8"))
+                parts = response_payload["candidates"][0]["content"]["parts"]
+                content_text = "".join(part.get("text", "") for part in parts)
+                parsed = safe_parse_json(content_text)
+                error_tags = parsed.get("error_tags", [])
+                parsed["error_tags"] = [tag for tag in error_tags if tag in ALLOWED_ERROR_TAGS]
+                return {
+                    "model": model_name,
+                    "response_label": response_label,
+                    "payload": response_payload,
+                    "json": parsed,
+                }
+            except error.HTTPError as exc:
+                error_text = exc.read().decode("utf-8", errors="ignore")[:400]
+                if exc.code == 429 and attempt < 3:
+                    # 무료/저비용 등급에서는 분당 호출량에 민감해 `429`가 자주 난다.
+                    # 같은 모델로 잠시 기다렸다가 다시 치면 성공하는 경우가 많아서
+                    # `v4`부터는 즉시 fallback으로 내리지 않고 짧게 재시도한다.
+                    time.sleep(12 * (attempt + 1))
+                    continue
+                errors.append({"model": model_name, "status_code": exc.code, "text": error_text})
+                break
+            except Exception as exc:  # noqa: BLE001
+                errors.append({"model": model_name, "status_code": "client_error", "text": str(exc)[:400]})
+                break
 
     raise RuntimeError(f"Gemini 호출 실패: {errors}")
 

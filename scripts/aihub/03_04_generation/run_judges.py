@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 from common import (
     call_gemini_json,
@@ -139,6 +139,9 @@ def evaluate_one(sample, generation, role_name):
             response_label=f"{generation['candidate_id']}::{role_name}",
         )
         response["judge_mode"] = "gemini_api"
+        # `v4`는 Judge 백본을 하나로 통일했고, 추가적인 429 대응은 공통 호출부에서
+        # 재시도로 처리하므로 요청 간 간격은 과도하게 길지 않게 둔다.
+        time.sleep(1.2)
     except RuntimeError:
         response = {
             "model": "local_rule_fallback",
@@ -160,18 +163,11 @@ def main():
         "Pedagogy": [],
     }
 
-    futures = []
-    # `v3`는 ablation으로 후보 수가 두 배가 되므로, Judge는 동시성을 조금 낮춰
-    # 외부 API 응답 대기가 과도하게 길어지는 상황을 줄인다.
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        for generation in generations:
-            sample = sample_map[generation["sample_id"]]
-            for role_name in outputs:
-                futures.append(executor.submit(evaluate_one, sample, generation, role_name))
-
-        for future in as_completed(futures):
-            role_name, row = future.result()
-            outputs[role_name].append(row)
+    for generation in generations:
+        sample = sample_map[generation["sample_id"]]
+        for role_name in outputs:
+            resolved_role_name, row = evaluate_one(sample, generation, role_name)
+            outputs[resolved_role_name].append(row)
 
     for role_name in outputs:
         outputs[role_name].sort(key=lambda row: (row["sample_id"], row["candidate_id"]))
