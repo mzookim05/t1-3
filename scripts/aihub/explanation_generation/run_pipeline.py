@@ -1,4 +1,6 @@
 import json
+import sys
+from pathlib import Path
 
 from build_sample_registry import main as build_sample_registry
 from common import ensure_run_dirs, write_json_atomic
@@ -8,8 +10,14 @@ from generate_explanations import main as generate_explanations
 from merge_judge_scores import main as merge_judge_scores
 from run_judges import main as run_judges
 from settings import RUN_MANIFEST_PATH
-from split_by_family import main as split_by_family
 from transform_problems import main as transform_problems
+
+
+DATASET_BUILD_DIR = Path(__file__).resolve().parents[1] / "dataset_build"
+if str(DATASET_BUILD_DIR) not in sys.path:
+    sys.path.insert(0, str(DATASET_BUILD_DIR))
+
+from split_by_family import main as split_by_family
 
 
 def main():

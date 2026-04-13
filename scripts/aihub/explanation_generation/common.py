@@ -11,13 +11,26 @@ from urllib import error, request
 from settings import (
     ACTIVE_GENERATION_VARIANT,
     ALLOWED_ERROR_TAGS,
+    ANSWER_LOG_PATH,
     DATASET_SPECS,
+    DATASET_MANIFEST_PATH,
+    DEV_PATH,
+    EVIDENCE_CARDS_PATH,
     GENERATOR_MAX_TOKENS,
     GENERATOR_MODEL_CANDIDATES,
     GENERATION_INPUT_VARIANTS,
     GENERATOR_TEMPERATURE,
+    GENERATIONS_PATH,
+    GROUNDING_LOG_PATH,
+    INTERIM_DIR,
     JUDGE_MODEL_CANDIDATES,
+    JUDGE_READY_SAMPLES_PATH,
     JUDGE_TEMPERATURE,
+    MEETING_EXAMPLES_CSV_PATH,
+    MEETING_EXAMPLES_MD_PATH,
+    MERGED_SCORES_PATH,
+    PEDAGOGY_LOG_PATH,
+    PROCESSED_DIR,
     PROJECT_ROOT,
     PROMPT_DIR,
     RUN_DIR,
@@ -28,6 +41,11 @@ from settings import (
     RUN_MERGED_DIR,
     RUN_NAME,
     RUN_PROMPTS_DIR,
+    SAMPLE_REGISTRY_PATH,
+    TEST_PATH,
+    TRAIN_PATH,
+    TRANSFORMED_SAMPLES_PATH,
+    VERSION_TAG,
 )
 
 
@@ -77,6 +95,8 @@ def load_root_env():
 
 def ensure_run_dirs():
     for path in (
+        INTERIM_DIR,
+        PROCESSED_DIR,
         RUN_DIR,
         RUN_PROMPTS_DIR,
         RUN_INPUTS_DIR,
@@ -491,11 +511,32 @@ def copy_file_to_run_inputs(source_path, target_name=None):
 
 def build_run_manifest():
     return {
+        "version_tag": VERSION_TAG,
         "run_name": RUN_NAME,
         "generated_at_utc": utc_now_iso(),
+        "run_dir": str(RUN_DIR),
+        "interim_dir": str(INTERIM_DIR),
+        "processed_dir": str(PROCESSED_DIR),
         "generator_model_candidates": list(GENERATOR_MODEL_CANDIDATES),
         "judge_model_candidates": list(JUDGE_MODEL_CANDIDATES),
         "active_generation_variant": ACTIVE_GENERATION_VARIANT,
         "generation_input_variants": list(GENERATION_INPUT_VARIANTS),
         "dataset_specs": DATASET_SPECS,
+        "artifact_paths": {
+            "sample_registry": str(SAMPLE_REGISTRY_PATH),
+            "evidence_cards": str(EVIDENCE_CARDS_PATH),
+            "transformed_samples": str(TRANSFORMED_SAMPLES_PATH),
+            "judge_ready_samples": str(JUDGE_READY_SAMPLES_PATH),
+            "generated_explanations": str(GENERATIONS_PATH),
+            "judge_grounding_log": str(GROUNDING_LOG_PATH),
+            "judge_answer_log": str(ANSWER_LOG_PATH),
+            "judge_pedagogy_log": str(PEDAGOGY_LOG_PATH),
+            "merged_scores": str(MERGED_SCORES_PATH),
+            "meeting_examples_md": str(MEETING_EXAMPLES_MD_PATH),
+            "meeting_examples_csv": str(MEETING_EXAMPLES_CSV_PATH),
+            "train": str(TRAIN_PATH),
+            "dev": str(DEV_PATH),
+            "test": str(TEST_PATH),
+            "dataset_manifest": str(DATASET_MANIFEST_PATH),
+        },
     }

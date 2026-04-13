@@ -11,7 +11,7 @@ from pathlib import Path
 # 실행 시점마다 표본이 달라지면 결과 비교가 어렵기 때문에 입력 경로, 표본 수,
 # 성공 기준, 출력 파일명은 모두 코드 내부 상수로 고정한다.
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[1]
+PROJECT_ROOT = SCRIPT_DIR.parents[3]
 
 QA_DIR = (
     PROJECT_ROOT
@@ -46,9 +46,9 @@ ALL_RAW_GLOB = (
 )
 
 # 브리지 검증 결과는 실행 1회 로그가 아니라 기준선에 가까운 검산 자료이므로
-# `analysis/aihub/bridge` 아래에 고정해 두되, 실제 데이터 preview를 포함할 수 있어
+# `analysis/aihub/explanation_generation/bridge` 아래에 고정해 두되, 실제 데이터 preview를 포함할 수 있어
 # 기본값은 로컬 비추적 산출물로 관리한다.
-OUTPUT_DIR = PROJECT_ROOT / "analysis" / "aihub" / "bridge"
+OUTPUT_DIR = PROJECT_ROOT / "analysis" / "aihub" / "explanation_generation" / "bridge"
 OUTPUT_STEM = "aihub_03_interpretation_bridge_v1_validation"
 OUTPUT_CSV = OUTPUT_DIR / f"{OUTPUT_STEM}.csv"
 OUTPUT_JSON = OUTPUT_DIR / f"{OUTPUT_STEM}.json"

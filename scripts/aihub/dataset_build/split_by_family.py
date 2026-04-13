@@ -1,5 +1,10 @@
-import json
-from collections import defaultdict
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+EXPLANATION_DIR = SCRIPT_DIR.parent / "explanation_generation"
+if str(EXPLANATION_DIR) not in sys.path:
+    sys.path.insert(0, str(EXPLANATION_DIR))
 
 from common import write_csv_atomic, write_jsonl_atomic
 from settings import DATASET_MANIFEST_PATH, DEV_PATH, MERGED_SCORES_PATH, TEST_PATH, TRAIN_PATH
@@ -61,6 +66,8 @@ def assign_splits(rows):
 
 
 def main(rows):
+    # dataset_build 단계는 생성 결과를 그대로 저장하지 않고,
+    # 최종 학습·평가셋 규칙에 맞는 split과 manifest만 확정한다.
     train_rows, dev_rows, test_rows, manifest_rows = assign_splits(rows)
     write_jsonl_atomic(TRAIN_PATH, train_rows)
     write_jsonl_atomic(DEV_PATH, dev_rows)

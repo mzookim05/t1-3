@@ -4,9 +4,13 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[2]
 
-VERSION_TAG = "v5"
-RUN_NAME = "2026-04-07_v5_law_refine"
-RUN_DIR = PROJECT_ROOT / "analysis" / "llm_runs" / RUN_NAME
+# `v6`부터는 현재 분리한 explanation_generation 디렉토리를 기준으로
+# 새 입력/출력 산출물을 남기도록 기본 실행 버전을 올린다.
+VERSION_TAG = "v6"
+RUN_DATE = "2026-04-13"
+RUN_PURPOSE = "model_refresh"
+RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
+RUN_DIR = PROJECT_ROOT / "analysis" / "aihub" / "explanation_generation" / "llm_runs" / RUN_NAME
 RUN_PROMPTS_DIR = RUN_DIR / "prompts"
 RUN_INPUTS_DIR = RUN_DIR / "inputs"
 RUN_GENERATIONS_DIR = RUN_DIR / "generations"
@@ -14,8 +18,10 @@ RUN_JUDGE_LOGS_DIR = RUN_DIR / "judge_logs"
 RUN_MERGED_DIR = RUN_DIR / "merged"
 RUN_EXPORTS_DIR = RUN_DIR / "exports"
 
-INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "generation"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "generation"
+INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "explanation_generation"
+# 최종 `train/dev/test`와 `dataset_manifest`는 생성 축이 아니라
+# dataset_build 축의 산출물로 관리해 운영자가 최종셋 위치를 한 곳에서 찾게 한다.
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "dataset_build"
 PROMPT_DIR = SCRIPT_DIR / "prompts"
 
 SAMPLE_REGISTRY_PATH = INTERIM_DIR / f"sample_registry_{VERSION_TAG}.csv"
@@ -42,14 +48,12 @@ DATASET_MANIFEST_PATH = PROCESSED_DIR / f"dataset_manifest_{VERSION_TAG}.csv"
 
 # 비밀값이 아닌 실행 상수는 `.env`가 아니라 여기에 두어,
 # 어떤 모델과 규칙으로 실행했는지 문서와 코드가 같이 움직이게 한다.
-# 생성은 최신 mini 계열을 우선 사용하되, 호환성 문제에 대비해 안정적인
-# `gpt-4.1-mini`를 2순위로 둔다.
-GENERATOR_MODEL_CANDIDATES = ("gpt-5.4-mini", "gpt-4.1-mini")
-# `v4`부터는 동일 런 안에서 Judge 백본을 하나로 통일해 비교 가능성을 높였고,
-# `v5`에서도 같은 조건을 유지해 법령 보정 효과만 보게 한다.
-JUDGE_MODEL_CANDIDATES = ("gemini-2.5-flash",)
+# `v6` 기본 조합은 회의 기준 최신 우선안인 `gpt-5.4`와 `gemini-2.5-pro`로 잠근다.
+# 자동으로 다른 상용 모델로 하향하지 않고, 실패 시에는 로컬 fallback이 드러나게 남긴다.
+GENERATOR_MODEL_CANDIDATES = ("gpt-5.4",)
+JUDGE_MODEL_CANDIDATES = ("gemini-2.5-pro",)
 ACTIVE_GENERATION_VARIANT = "without_long_answer"
-# `v5`에서도 `long_answer` 제거가 기본 경로이고, 포함 여부는 ablation으로만 비교한다.
+# `v6`에서도 `long_answer` 제거를 기본 경로로 두고, 포함 여부는 ablation으로만 비교한다.
 GENERATION_INPUT_VARIANTS = (
     {
         "name": "without_long_answer",
