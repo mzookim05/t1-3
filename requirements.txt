@@ -3,3 +3,6 @@ requests==2.32.4
 beautifulsoup4==4.14.3
 urllib3==2.5.0
 PyMuPDF==1.27.2.2
+# dataset_build의 실제 학습 baseline은 scikit-learn 기반으로 고정한다.
+scikit-learn==1.5.2
+joblib==1.4.2
