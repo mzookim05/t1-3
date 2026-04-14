@@ -144,7 +144,6 @@ docs/**
 
 # Project
 project/**
-!project/README.md
 
 # Local directories
 local/
