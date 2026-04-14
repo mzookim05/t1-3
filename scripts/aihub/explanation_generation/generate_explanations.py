@@ -1,3 +1,6 @@
+import argparse
+import re
+
 from common import (
     call_openai_json,
     load_jsonl,
@@ -81,6 +84,35 @@ def enforce_law_conclusion(sample, generated_explanation):
     return " ".join(sentence for sentence in sentences if sentence)
 
 
+def relax_unsupported_final_citation(sample, generated_explanation):
+    cleaned_explanation = normalized_text(generated_explanation)
+    if sample["doc_type_name"] not in ("해석례_QA", "결정례_QA", "판결문_QA"):
+        return cleaned_explanation
+
+    sentences = [normalized_text(sentence) for sentence in split_sentences(cleaned_explanation) if normalized_text(sentence)]
+    if not sentences:
+        return cleaned_explanation
+
+    evidence_text = normalized_text(
+        " ".join(sentence["text"] for sentence in sample["evidence_card"]["evidence_sentences"])
+    )
+    last_sentence = sentences[-1]
+    citation_match = re.match(
+        r"^((?:구\s*)?[「」A-Za-z가-힣·ㆍ\s]+제\d+조(?:제\d+항)?(?:제\d+호)?)(?:에 따르면|에 따라),?\s*",
+        last_sentence,
+    )
+    if citation_match and normalized_text(citation_match.group(1)) not in evidence_text:
+        sentences[-1] = last_sentence[citation_match.end() :].strip()
+
+    return " ".join(sentence for sentence in sentences if sentence)
+
+
+def postprocess_generated_explanation(sample, generated_explanation):
+    processed = enforce_law_conclusion(sample, generated_explanation)
+    processed = relax_unsupported_final_citation(sample, processed)
+    return processed
+
+
 def build_messages(sample, style_name, generation_variant):
     system_prompt = load_prompt("generator_system.txt")
     user_template = load_prompt("generator_user_template.md")
@@ -93,6 +125,8 @@ def build_messages(sample, style_name, generation_variant):
             "transformed_problem": sample["transformed_problem"],
             "short_answer": sample["short_answer"],
             "long_answer_block": build_long_answer_block(sample, generation_variant),
+            "answer_mode": sample.get("answer_mode", ""),
+            "explanation_target": sample.get("explanation_target", ""),
             "law_question_mode": sample.get("law_question_mode", ""),
             "law_generation_hint": sample.get("law_generation_hint", ""),
             "law_closing_target": sample.get("law_closing_target", ""),
@@ -132,52 +166,92 @@ def build_local_fallback_explanation(sample, style_name, generation_variant):
     return " ".join(cleaned)
 
 
-def main():
+def checkpoint_outputs(rows):
+    write_jsonl_atomic(GENERATIONS_PATH, rows)
+
+
+def load_existing_rows():
+    if not GENERATIONS_PATH.exists():
+        return []
+    return [
+        row
+        for row in load_jsonl(GENERATIONS_PATH)
+        if row.get("generation_mode") == "openai_api"
+    ]
+
+
+def generate_one(sample, style_name, generation_variant, strict_mode):
+    candidate_id = f"{sample['sample_id']}::{style_name}::{generation_variant['name']}"
+    while True:
+        try:
+            response = call_openai_json(
+                build_messages(sample, style_name, generation_variant),
+                response_label=candidate_id,
+            )
+            generated_explanation = response["json"]["generated_explanation"].strip()
+            generator_model = response["model"]
+            generation_mode = "openai_api"
+        except RuntimeError as exc:
+            if strict_mode:
+                continue
+            generated_explanation = build_local_fallback_explanation(sample, style_name, generation_variant)
+            generator_model = "local_template_fallback"
+            generation_mode = f"fallback:{str(exc)[:160]}"
+        generated_explanation = postprocess_generated_explanation(sample, generated_explanation)
+        return {
+            "sample_id": sample["sample_id"],
+            "candidate_id": candidate_id,
+            "style_name": style_name,
+            "ablation_variant": generation_variant["name"],
+            "ablation_label": generation_variant["label"],
+            "include_long_answer": generation_variant["include_long_answer"],
+            "doc_type_name": sample["doc_type_name"],
+            "family_id": sample["family_id"],
+            "source_subset": sample["source_subset"],
+            "sampling_lane": sample.get("sampling_lane", ""),
+            "transformed_problem": sample["transformed_problem"],
+            "original_input": sample["original_input"],
+            "short_answer": sample["short_answer"],
+            "long_answer": sample["long_answer"],
+            "answer_mode": sample.get("answer_mode", ""),
+            "explanation_target": sample.get("explanation_target", ""),
+            "generator_template_name": sample.get("generator_template_name", ""),
+            "generated_explanation": generated_explanation,
+            "generator_model": generator_model,
+            "generation_mode": generation_mode,
+            "generated_at_utc": utc_now_iso(),
+        }
+
+
+def main(mode="main"):
     snapshot_prompts(["generator_system.txt", "generator_user_template.md"])
     samples = load_jsonl(JUDGE_READY_SAMPLES_PATH)
-    rows = []
+    strict_mode = mode == "strict_finalize"
+    rows = load_existing_rows()
+    completed_candidate_ids = {row["candidate_id"] for row in rows}
 
     for sample in samples:
         for generation_variant in GENERATION_INPUT_VARIANTS:
             for style_name in sample["candidate_styles"]:
                 candidate_id = f"{sample['sample_id']}::{style_name}::{generation_variant['name']}"
-                try:
-                    response = call_openai_json(
-                        build_messages(sample, style_name, generation_variant),
-                        response_label=candidate_id,
-                    )
-                    generated_explanation = response["json"]["generated_explanation"].strip()
-                    generator_model = response["model"]
-                    generation_mode = "openai_api"
-                except RuntimeError as exc:
-                    generated_explanation = build_local_fallback_explanation(sample, style_name, generation_variant)
-                    generator_model = "local_template_fallback"
-                    generation_mode = f"fallback:{str(exc)[:160]}"
-                generated_explanation = enforce_law_conclusion(sample, generated_explanation)
-                rows.append(
-                    {
-                        "sample_id": sample["sample_id"],
-                        "candidate_id": candidate_id,
-                        "style_name": style_name,
-                        "ablation_variant": generation_variant["name"],
-                        "ablation_label": generation_variant["label"],
-                        "include_long_answer": generation_variant["include_long_answer"],
-                        "doc_type_name": sample["doc_type_name"],
-                        "family_id": sample["family_id"],
-                        "source_subset": sample["source_subset"],
-                        "transformed_problem": sample["transformed_problem"],
-                        "short_answer": sample["short_answer"],
-                        "long_answer": sample["long_answer"],
-                        "generated_explanation": generated_explanation,
-                        "generator_model": generator_model,
-                        "generation_mode": generation_mode,
-                        "generated_at_utc": utc_now_iso(),
-                    }
-                )
+                if candidate_id in completed_candidate_ids:
+                    continue
+                rows.append(generate_one(sample, style_name, generation_variant, strict_mode))
+                completed_candidate_ids.add(candidate_id)
+                if len(rows) % 4 == 0:
+                    checkpoint_outputs(rows)
 
-    write_jsonl_atomic(GENERATIONS_PATH, rows)
+    checkpoint_outputs(rows)
     return rows
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        choices=("main", "strict_finalize"),
+        default="main",
+        help="생성 실행 모드",
+    )
+    args = parser.parse_args()
+    main(mode=args.mode)

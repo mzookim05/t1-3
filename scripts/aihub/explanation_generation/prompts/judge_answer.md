@@ -6,6 +6,8 @@
 - 문제: {transformed_problem}
 - 정답: {short_answer}
 - 장답: {long_answer}
+- `answer_mode`: {answer_mode}
+- `explanation_target`: {explanation_target}
 - 해설: {generated_explanation}
 
 채점 기준:

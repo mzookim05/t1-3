@@ -33,6 +33,8 @@ def build_markdown(rows):
                 f"- `source_subset`: `{row['source_subset']}`",
                 f"- `family_id`: `{row['family_id']}`",
                 f"- `weighted_score`: `{row['weighted_score']}`",
+                f"- `train_eligible`: `{row.get('train_eligible', '')}`",
+                f"- `audit_reason`: `{row.get('audit_reason', '')}`",
                 f"- 문제: {row['transformed_problem']}",
                 f"- 정답: {row['short_answer']}",
                 f"- 해설: {row['generated_explanation']}",

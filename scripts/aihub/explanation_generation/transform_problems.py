@@ -164,6 +164,30 @@ def build_law_required_terms(card, short_answer, law_question_mode):
     return required_terms
 
 
+def build_answer_mode(card, law_question_mode):
+    if card["doc_type_name"] == "법령_QA":
+        return law_question_mode or "criteria"
+    if card["doc_type_name"] == "해석례_QA":
+        return "criteria"
+    return "application"
+
+
+def build_explanation_target(card, law_question_mode):
+    if card["doc_type_name"] == "법령_QA":
+        mapping = {
+            "definition": "조문정의",
+            "requirement": "요건정리",
+            "scope": "범위정리",
+            "criteria": "판단기준정리",
+        }
+        return mapping.get(law_question_mode or "criteria", "판단기준정리")
+    if card["doc_type_name"] == "해석례_QA":
+        return "회답이유정리"
+    if card["doc_type_name"] == "결정례_QA":
+        return "핵심법리와사안적용"
+    return "판시기준과사건적용"
+
+
 def build_transformed_problem(card):
     title = card["title"]
     original_input = normalized_text(card["original_input"]).rstrip("?")
@@ -199,6 +223,8 @@ def build_transformed_sample(card):
         else pick_short_answer(card["label_output"])
     )
     long_answer = pick_long_answer(card["label_output"])
+    answer_mode = build_answer_mode(card, law_question_mode)
+    explanation_target = build_explanation_target(card, law_question_mode)
 
     enriched_card = {
         **card,
@@ -214,6 +240,8 @@ def build_transformed_sample(card):
         "transformed_problem": build_transformed_problem(enriched_card),
         "short_answer": short_answer,
         "long_answer": long_answer,
+        "answer_mode": answer_mode,
+        "explanation_target": explanation_target,
         "long_answer_word_count": count_words(long_answer),
         "candidate_styles": list(rule["styles"]),
         "generator_template_name": template_name,

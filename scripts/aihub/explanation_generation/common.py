@@ -12,6 +12,7 @@ from settings import (
     ACTIVE_GENERATION_VARIANT,
     ALLOWED_ERROR_TAGS,
     ANSWER_LOG_PATH,
+    AUDIT_QUEUE_PATH,
     DATASET_SPECS,
     DATASET_MANIFEST_PATH,
     DEV_PATH,
@@ -21,10 +22,12 @@ from settings import (
     GENERATION_INPUT_VARIANTS,
     GENERATOR_TEMPERATURE,
     GENERATIONS_PATH,
+    GENERATOR_API_TIMEOUT_SECONDS,
     GROUNDING_LOG_PATH,
     INTERIM_DIR,
     JUDGE_MODEL_CANDIDATES,
     JUDGE_READY_SAMPLES_PATH,
+    JUDGE_API_TIMEOUT_SECONDS,
     JUDGE_TEMPERATURE,
     MEETING_EXAMPLES_CSV_PATH,
     MEETING_EXAMPLES_MD_PATH,
@@ -75,6 +78,13 @@ RAW_ID_COLUMN_BY_DOC_TYPE = {
     "해석례_QA": "해석례일련번호",
     "결정례_QA": "결정례일련번호",
     "판결문_QA": "판례일련번호",
+}
+
+CANONICAL_TITLE_FIELD_BY_DOC_TYPE = {
+    "법령_QA": "title",
+    "해석례_QA": "agenda",
+    "결정례_QA": "caseName",
+    "판결문_QA": "caseName",
 }
 
 
@@ -172,8 +182,59 @@ def load_csv_rows(path):
         return list(csv.DictReader(input_file))
 
 
+def text_or_blank(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def normalized_text(text):
     return re.sub(r"\s+", " ", str(text)).strip()
+
+
+def collapse_json_sentence_items(sentences):
+    if isinstance(sentences, str):
+        return [sentences]
+
+    cleaned = [text_or_blank(sentence) for sentence in sentences if text_or_blank(sentence)]
+    if not cleaned:
+        return []
+
+    single_char_ratio = sum(1 for sentence in cleaned if len(sentence) <= 1) / len(cleaned)
+    if len(cleaned) >= 20 and single_char_ratio >= 0.7:
+        return ["".join(cleaned)]
+    return cleaned
+
+
+def split_structured_sections(text, doc_type_name):
+    normalized = normalized_text(text)
+    if not normalized:
+        return []
+
+    if doc_type_name != "해석례_QA":
+        return [("본문", normalized)]
+
+    pattern = re.compile(r"(질의요지|질의배경|회답|이유)\s*:")
+    matches = list(pattern.finditer(normalized))
+    if not matches:
+        return [("본문", normalized)]
+
+    sections = []
+    for index, match in enumerate(matches):
+        header = match.group(1)
+        content_start = match.end()
+        content_end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        content = normalized_text(normalized[content_start:content_end])
+        if content:
+            sections.append((header, content))
+    return sections or [("본문", normalized)]
+
+
+def extract_structured_section_text(text, doc_type_name, section_name):
+    for header, content in split_structured_sections(text, doc_type_name):
+        if header == section_name and content:
+            return content
+    return ""
 
 
 def classify_law_question(original_input):
@@ -331,10 +392,81 @@ def list_label_files(pattern):
 
 
 def list_raw_files(pattern):
-    return sorted(PROJECT_ROOT.glob(pattern))
+    return [path for path in sorted(PROJECT_ROOT.glob(pattern)) if path.name != ".extract_complete.json"]
+
+
+def normalize_label_payload(label_path, payload, doc_type_name):
+    info = dict(payload.get("info", {}))
+
+    if "label" in payload:
+        info.setdefault("source_schema", "aihub_03_04_label")
+        return {
+            "info": info,
+            "label": dict(payload["label"]),
+        }
+
+    if "taskinfo" in payload:
+        stem_parts = Path(label_path).stem.split("_")
+        # `01·02` 라벨 파일명은 `{도메인}_{유형}_질의응답_{번호}` 구조라,
+        # 한글 정규화 차이에 흔들리지 않도록 penultimate token을 위치 기준으로 제거한다.
+        if len(stem_parts) >= 4 and not stem_parts[-2].isdigit():
+            raw_match_stem = "_".join(stem_parts[:-2] + [stem_parts[-1]])
+        else:
+            raw_match_stem = Path(label_path).stem
+        info.update(
+            {
+                "source_schema": "aihub_01_02_taskinfo",
+                "raw_match_stem": raw_match_stem,
+                # `01·02`는 `03·04`처럼 stable numeric id가 없으므로,
+                # 실제 원천 파일 stem을 family 기준으로 삼아 같은 원문 중복 유입을 막는다.
+                "family_id_hint": f"{doc_type_name}::{raw_match_stem}",
+            }
+        )
+
+        if doc_type_name == "법령_QA":
+            info.setdefault("lawId", text_or_blank(info.get("statute_name")) or raw_match_stem)
+            info.setdefault("title", text_or_blank(info.get("statute_name")))
+            info.setdefault("smClass", "")
+        elif doc_type_name == "해석례_QA":
+            info.setdefault("interpreId", text_or_blank(info.get("doc_id")) or raw_match_stem)
+            info.setdefault("agenda", text_or_blank(info.get("title")))
+        elif doc_type_name == "결정례_QA":
+            info.setdefault("determintId", text_or_blank(info.get("doc_id")) or raw_match_stem)
+            info.setdefault(
+                "caseName",
+                text_or_blank(info.get("title")) or text_or_blank(info.get("document_type")) or raw_match_stem,
+            )
+        elif doc_type_name == "판결문_QA":
+            info.setdefault("precedId", text_or_blank(info.get("doc_id")) or raw_match_stem)
+            info.setdefault("caseName", text_or_blank(info.get("casenames")) or raw_match_stem)
+
+        taskinfo = payload.get("taskinfo", {})
+        taskinfo_sentences = text_or_blank(taskinfo.get("sentences"))
+        taskinfo_output = text_or_blank(taskinfo.get("output"))
+        if doc_type_name == "해석례_QA":
+            authoritative_reply = extract_structured_section_text(
+                taskinfo_sentences,
+                doc_type_name,
+                "회답",
+            )
+            if authoritative_reply:
+                info["taskinfo_output_original"] = taskinfo_output
+                taskinfo_output = authoritative_reply
+        return {
+            "info": info,
+            "label": {
+                "instruction": text_or_blank(taskinfo.get("instruction")),
+                "input": text_or_blank(taskinfo.get("input")),
+                "output": taskinfo_output,
+            },
+        }
+
+    raise ValueError(f"지원하지 않는 라벨 스키마입니다: {label_path}")
 
 
 def make_family_id(doc_type_name, info):
+    if info.get("family_id_hint"):
+        return str(info["family_id_hint"])
     if doc_type_name == "법령_QA":
         return f"{info['lawId']}::{info.get('smClass', '').strip()}"
     if doc_type_name == "해석례_QA":
@@ -356,6 +488,12 @@ def lexical_overlap_score(text, query_tokens):
 
 
 def locate_raw_path(raw_paths, doc_type_name, info):
+    raw_match_stem = text_or_blank(info.get("raw_match_stem"))
+    if raw_match_stem:
+        exact_matches = [path for path in raw_paths if path.stem == raw_match_stem]
+        if exact_matches:
+            return exact_matches[0]
+
     wanted_id = str(info[ID_FIELD_BY_DOC_TYPE[doc_type_name]]).strip()
     exact_matches = [path for path in raw_paths if path.stem.split("_")[-1] == wanted_id]
     if exact_matches:
@@ -367,10 +505,86 @@ def locate_raw_path(raw_paths, doc_type_name, info):
 def build_title(record):
     info = record["info"]
     doc_type_name = record["doc_type_name"]
-    title_value = info.get(TITLE_FIELD_BY_DOC_TYPE[doc_type_name], "")
+    title_value = info.get(TITLE_FIELD_BY_DOC_TYPE[doc_type_name], "") or info.get(
+        CANONICAL_TITLE_FIELD_BY_DOC_TYPE[doc_type_name],
+        "",
+    )
     if doc_type_name == "법령_QA":
         return f"{title_value} {info.get('smClass', '').strip()}".strip()
     return normalized_text(title_value)
+
+
+def infer_json_section(doc_type_name, text, current_section):
+    stripped = normalized_text(text)
+    if not stripped:
+        return current_section or ""
+
+    if doc_type_name == "법령_QA":
+        if re.match(r"^제\d+조(?:의\d+)?", stripped):
+            return "조문"
+        if re.match(r"^\d+\.\s*", stripped):
+            return "호"
+        if re.match(r"^[가-하]\.\s*", stripped):
+            return "목"
+        return current_section or "조문"
+
+    if doc_type_name == "해석례_QA":
+        for section_name in ("질의요지", "회답", "이유"):
+            if stripped.startswith(section_name):
+                return section_name
+        return current_section or "본문"
+
+    section_keywords = (
+        "판시사항",
+        "판결요지",
+        "참조조문",
+        "주문",
+        "이유",
+        "판단",
+        "기초사실",
+        "절차의 경위",
+        "청구취지",
+        "신청취지",
+        "범죄사실",
+        "쟁점",
+    )
+    for keyword in section_keywords:
+        if stripped.startswith(keyword) or stripped.startswith(f"【{keyword}】"):
+            return keyword
+
+    return current_section or "전문"
+
+
+def load_raw_rows(raw_path, doc_type_name):
+    raw_path = Path(raw_path)
+    if raw_path.suffix.lower() == ".csv":
+        return load_csv_rows(raw_path)
+
+    payload = load_json(raw_path)
+    sentences = collapse_json_sentence_items(payload.get("sentences", []))
+
+    rows = []
+    current_section = ""
+    sentence_number = 1
+    for sentence in sentences:
+        for header, content in split_structured_sections(sentence, doc_type_name):
+            sentence_parts = split_sentences(content) if len(content) >= 240 else [content]
+            for sentence_part in sentence_parts:
+                text = normalized_text(sentence_part)
+                if not text:
+                    continue
+                if header != "본문" and not text.startswith(header):
+                    text = f"{header} {text}"
+                current_section = infer_json_section(doc_type_name, text, current_section)
+                rows.append(
+                    {
+                        "문장번호": str(sentence_number),
+                        "구분": current_section or "본문",
+                        "내용": text,
+                    }
+                )
+                sentence_number += 1
+    return rows
 
 
 def prompt_path(name):
@@ -433,7 +647,7 @@ def call_openai_json(messages, response_label):
             data=json.dumps(payload).encode("utf-8"),
         )
         try:
-            with request.urlopen(req, timeout=120) as response:
+            with request.urlopen(req, timeout=GENERATOR_API_TIMEOUT_SECONDS) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
             content = response_payload["choices"][0]["message"]["content"]
             return {
@@ -458,7 +672,7 @@ def call_gemini_json(prompt_text, response_label):
 
     errors = []
     for model_name in JUDGE_MODEL_CANDIDATES:
-        for attempt in range(4):
+        for attempt in range(2):
             payload = {
                 "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
                 "generationConfig": {
@@ -472,7 +686,7 @@ def call_gemini_json(prompt_text, response_label):
                 data=json.dumps(payload).encode("utf-8"),
             )
             try:
-                with request.urlopen(req, timeout=120) as response:
+                with request.urlopen(req, timeout=JUDGE_API_TIMEOUT_SECONDS) as response:
                     response_payload = json.loads(response.read().decode("utf-8"))
                 parts = response_payload["candidates"][0]["content"]["parts"]
                 content_text = "".join(part.get("text", "") for part in parts)
@@ -487,11 +701,11 @@ def call_gemini_json(prompt_text, response_label):
                 }
             except error.HTTPError as exc:
                 error_text = exc.read().decode("utf-8", errors="ignore")[:400]
-                if exc.code == 429 and attempt < 3:
-                    # 무료/저비용 등급에서는 분당 호출량에 민감해 `429`가 자주 난다.
-                    # 같은 모델로 잠시 기다렸다가 다시 치면 성공하는 경우가 많아서
-                    # `v4`부터는 즉시 fallback으로 내리지 않고 짧게 재시도한다.
-                    time.sleep(12 * (attempt + 1))
+                if exc.code in (429, 503) and attempt < 1:
+                    # `v6` 메인 런에서는 judge가 전체 파이프라인 병목이 되기 쉬워,
+                    # 장시간 재시도로 런이 멈춘 것처럼 보이는 상황을 줄이기 위해
+                    # 짧은 1회 재시도 뒤에는 local fallback으로 넘긴다.
+                    time.sleep(3 * (attempt + 1))
                     continue
                 errors.append({"model": model_name, "status_code": exc.code, "text": error_text})
                 break
@@ -538,5 +752,6 @@ def build_run_manifest():
             "dev": str(DEV_PATH),
             "test": str(TEST_PATH),
             "dataset_manifest": str(DATASET_MANIFEST_PATH),
+            "audit_queue": str(AUDIT_QUEUE_PATH),
         },
     }

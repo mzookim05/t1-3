@@ -25,8 +25,10 @@ def main():
     registry_rows = build_sample_registry()
     evidence_rows = extract_evidence_cards()
     transformed_rows = transform_problems()
-    generation_rows = generate_explanations()
-    judge_logs = run_judges()
+    generate_explanations(mode="main")
+    generation_rows = generate_explanations(mode="strict_finalize")
+    run_judges(mode="main")
+    judge_logs = run_judges(mode="strict_finalize")
     merged_rows = merge_judge_scores()
     split_manifest_rows = split_by_family(merged_rows)
     example_rows = export_meeting_examples(merged_rows)
@@ -60,6 +62,16 @@ def main():
                 1
                 for row in merged_rows
                 if row["selected_for_sample"] == "예" and row["final_status"] == "pass"
+            ),
+            "selected_train_eligible_count": sum(
+                1
+                for row in merged_rows
+                if row["selected_for_sample"] == "예" and row["train_eligible"] == "예"
+            ),
+            "selected_audit_required_count": sum(
+                1
+                for row in merged_rows
+                if row["selected_for_sample"] == "예" and row["audit_required"] == "예"
             ),
             "selected_hard_fail_count": sum(
                 1
