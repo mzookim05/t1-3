@@ -112,8 +112,6 @@ pnpm-debug.log*
 bin/
 .coverprofile
 
-# Rust
-
 # C and C++
 cmake-build-*/
 CMakeFiles/
@@ -138,6 +136,23 @@ vendor/
 .bundle/
 *.gem
 
+# Script output
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Local directories
+local/
+
+# Analysis outputs
+analysis/**
+!analysis/README.md
+
+# Data
+data/**
+!data/README.md
+
 # Docs
 docs/**
 !docs/README.md
@@ -146,23 +161,6 @@ docs/**
 project/**
 !project/README.md
 
-# Local directories
-local/
-
-# Analysis outputs
-analysis/**
-!analysis/
-!analysis/README.md
-
-# Data
-
-
-
-
-.gitkeep
-
-# Script output
-tmp/
-temp/
-*.tmp
-*.bak
+# KLAC
+scripts/klac/**
+!scripts/klac/README.md
