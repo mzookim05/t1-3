@@ -206,7 +206,7 @@ def build_seed_row(train_row):
         "problem_generation_mode": ANSWER_MODE_TO_PROBLEM_MODE.get(answer_mode, "split_single_issue_rule"),
         "explanation_target": train_row.get("explanation_target", ""),
         "selection_role": "descriptive_default_batch_seed",
-        "selection_note": "v3 strict-final selected row에 아직 들어가지 않은 train_v7 seed를 descriptive 기본 생산선으로 추가 생성",
+        "selection_note": "v3 strict-final selected row에 아직 들어가지 않은 v7_strict_final/train.jsonl seed를 descriptive 기본 생산선으로 추가 생성",
         "multi_query_signal": extract_multi_query_signal(train_row["transformed_problem"]),
         "split_focus_hint": build_split_focus_hint(train_row["transformed_problem"]),
         "transformed_problem": train_row["transformed_problem"],

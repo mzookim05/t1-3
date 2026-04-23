@@ -139,7 +139,7 @@ def build_markdown_report(version_tag, run_name, run_dir, config, train_summary,
         "",
         "## 소비 구조",
         "",
-        "- 입력: `problem_train/dev/test_v2.jsonl`의 generated stem, 선택지, 문서유형/대분류 메타",
+        "- 입력: `data/processed/aihub/problem_generation/v2_objective/{train,dev,test}.jsonl`의 generated stem, 선택지, 문서유형/대분류 메타",
         "- 학습/참조 자원: train split의 gold short answer + gold reference explanation",
         "- 예측 방식: test problem과 가장 가까운 train problem을 `top-k`로 retrieval한 뒤, retrieved answer reference와 가장 잘 맞는 선택지를 고른다",
         "- 평가 지표: choice accuracy, MRR, top-2 hit, top-3 hit",
@@ -156,7 +156,7 @@ def build_markdown_report(version_tag, run_name, run_dir, config, train_summary,
         "",
         "- 이 baseline은 LLM fine-tuning 결과가 아니라, 현재 `problem_generation v2` 산출물을 실제로 소비하는 경량 consumer baseline이다.",
         "- train 점수는 self-retrieval이 포함되므로 sanity check 성격으로 읽고, 실제 해석은 dev/test 위주로 본다.",
-        "- 핵심은 높은 절대 성능보다, `problem_train/dev/test_v2`를 바로 먹는 입력 포맷, retrieval reference, 선택지 ranking, 지표 계산 흐름을 실제로 잠갔다는 점이다.",
+        "- 핵심은 높은 절대 성능보다, `data/processed/aihub/problem_generation/v2_objective/{train,dev,test}.jsonl`을 바로 먹는 입력 포맷, retrieval reference, 선택지 ranking, 지표 계산 흐름을 실제로 잠갔다는 점이다.",
     ]
     return "\n".join(lines) + "\n"
 

@@ -4,7 +4,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[3]
 
-# `problem_generation v3`는 `train_v7` 안의 복수 질의형 seed를 다시 읽어,
+# `problem_generation v3`는 `v7_strict_final/train.jsonl` 안의 복수 질의형 seed를 다시 읽어,
 # 단일 쟁점 서술형으로 분리하는 첫 split-descriptive mainline이다.
 VERSION_TAG = "v3"
 RUN_DATE = "2026-04-22"

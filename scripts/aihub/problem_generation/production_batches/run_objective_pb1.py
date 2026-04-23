@@ -177,7 +177,7 @@ def build_seed_row(train_row):
         "problem_generation_mode": ANSWER_MODE_TO_PROBLEM_MODE.get(answer_mode, "single_best_rule"),
         "explanation_target": train_row.get("explanation_target", ""),
         "selection_role": "objective_default_batch_seed",
-        "selection_note": "v2 strict-final selected row에 아직 들어가지 않은 train_v7 seed를 objective 기본 생산선으로 추가 생성",
+        "selection_note": "v2 strict-final selected row에 아직 들어가지 않은 v7_strict_final/train.jsonl seed를 objective 기본 생산선으로 추가 생성",
         "transformed_problem": train_row["transformed_problem"],
         "short_answer": train_row["short_answer"],
         "generated_explanation": train_row["generated_explanation"],

@@ -19,9 +19,17 @@ RUN_MERGED_DIR = RUN_DIR / "merged"
 RUN_EXPORTS_DIR = RUN_DIR / "exports"
 
 INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "explanation_generation"
-# 최종 `train/dev/test`와 `dataset_manifest`는 생성 축이 아니라
-# dataset_build 축의 산출물로 관리해 운영자가 최종셋 위치를 한 곳에서 찾게 한다.
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "dataset_build"
+# 구조 개편 이후 explanation 최종셋은 dataset_build 루트가 아니라
+# `data/processed/aihub/explanation_generation/{version}` 아래에 버전별로 잠근다.
+PROCESSED_VERSION_DIRNAME = "v7_strict_final"
+PROCESSED_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "aihub"
+    / "explanation_generation"
+    / PROCESSED_VERSION_DIRNAME
+)
 PROMPT_DIR = SCRIPT_DIR / "prompts"
 
 SAMPLE_REGISTRY_PATH = INTERIM_DIR / f"sample_registry_{VERSION_TAG}.csv"
@@ -42,11 +50,13 @@ MEETING_EXAMPLES_CSV_PATH = RUN_EXPORTS_DIR / f"meeting_examples_{VERSION_TAG}.c
 ABLATION_SUMMARY_PATH = RUN_EXPORTS_DIR / f"ablation_summary_{VERSION_TAG}.csv"
 MEETING_EXAMPLES_TITLE = f"meeting_examples_{VERSION_TAG}"
 
-TRAIN_PATH = PROCESSED_DIR / f"train_{VERSION_TAG}.jsonl"
-DEV_PATH = PROCESSED_DIR / f"dev_{VERSION_TAG}.jsonl"
-TEST_PATH = PROCESSED_DIR / f"test_{VERSION_TAG}.jsonl"
-DATASET_MANIFEST_PATH = PROCESSED_DIR / f"dataset_manifest_{VERSION_TAG}.csv"
-AUDIT_QUEUE_PATH = PROCESSED_DIR / f"audit_queue_{VERSION_TAG}.csv"
+# 버전 정보는 폴더명에 이미 드러나므로, 내부 파일명은 역할명만 유지해
+# rerun 시에도 current folderized 구조와 문서 설명이 어긋나지 않게 맞춘다.
+TRAIN_PATH = PROCESSED_DIR / "train.jsonl"
+DEV_PATH = PROCESSED_DIR / "dev.jsonl"
+TEST_PATH = PROCESSED_DIR / "test.jsonl"
+DATASET_MANIFEST_PATH = PROCESSED_DIR / "dataset_manifest.csv"
+AUDIT_QUEUE_PATH = PROCESSED_DIR / "audit_queue.csv"
 
 # 비밀값이 아닌 실행 상수는 `.env`가 아니라 여기에 두어,
 # 어떤 모델과 규칙으로 실행했는지 문서와 코드가 같이 움직이게 한다.

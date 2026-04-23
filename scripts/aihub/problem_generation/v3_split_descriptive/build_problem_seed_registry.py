@@ -120,7 +120,7 @@ def main():
             for sample_id in sample_ids:
                 train_row = train_map.get(sample_id)
                 if not train_row:
-                    raise ValueError(f"train_v7에서 v3 target sample을 찾지 못했습니다: {sample_id}")
+                    raise ValueError(f"v7_strict_final/train.jsonl에서 v3 target sample을 찾지 못했습니다: {sample_id}")
                 if train_row["doc_type_name"] != doc_type_name:
                     raise ValueError(f"문서유형 불일치: expected={doc_type_name}, actual={train_row['doc_type_name']}")
                 if train_row["sampling_lane"] != sampling_lane:
