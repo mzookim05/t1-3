@@ -946,6 +946,8 @@ def assign_splits(rows):
                 "family_id": row["family_id"],
                 "doc_type_name": row["doc_type_name"],
                 "source_subset": row["source_subset"],
+                # Fresh production batch에서는 lane별 yield를 봐야 하므로 manifest에서도 source 축을 유지한다.
+                "sampling_lane": row.get("sampling_lane", ""),
                 "split": split,
                 "dataset_disposition": split,
                 "train_eligible": row.get("train_eligible", "예"),
@@ -990,6 +992,8 @@ def assign_splits(rows):
                 "family_id": row["family_id"],
                 "doc_type_name": row["doc_type_name"],
                 "source_subset": row["source_subset"],
+                # audit row도 train/dev/test와 같은 컬럼을 유지해 reviewer가 lane별 tail을 같이 볼 수 있게 한다.
+                "sampling_lane": row.get("sampling_lane", ""),
                 "split": "audit",
                 "dataset_disposition": "audit",
                 "train_eligible": row.get("train_eligible", "아니오"),
