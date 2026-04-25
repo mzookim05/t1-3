@@ -1,14 +1,19 @@
 from pathlib import Path
+import sys
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
 
 # `problem_generation v2`는 설명형 서술형 `v1`을 유지한 채,
 # 첫 객관식 prototype을 별도 mainline으로 여는 실행이다.
 VERSION_TAG = "v2"
-# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-14_203007"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "qa_objective_single_best"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -14,12 +15,16 @@ def find_project_root(start_dir):
 
 
 PROJECT_ROOT = find_project_root(SCRIPT_DIR)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
 
 # `v7`은 `v6 strict final`의 표본을 그대로 재사용해,
 # 남은 `hard fail 4 + audit 1`을 줄이는 최소 안정화 런이다.
 VERSION_TAG = "v7"
-# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-14_103340"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "tail_stabilization_full_01_04"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 RUN_DIR = PROJECT_ROOT / "analysis" / "aihub" / "explanation_generation" / "llm_runs" / RUN_NAME

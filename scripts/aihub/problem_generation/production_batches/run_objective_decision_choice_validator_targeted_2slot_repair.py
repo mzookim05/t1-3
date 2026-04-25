@@ -8,6 +8,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
+
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
 EXPLANATION_DIR_FOR_IMPORT = PROJECT_ROOT_FOR_IMPORT / "scripts" / "aihub" / "problem_generation" / "explanation_generation"
 if str(EXPLANATION_DIR_FOR_IMPORT) not in sys.path:
     # 구조 개편 후 explanation_generation은 problem_generation 아래에 있으므로,
@@ -26,8 +28,8 @@ from scripts.aihub.problem_generation.production_batches import (  # noqa: E402
 
 
 VERSION_TAG = "decision_choice_validator_targeted_2slot_repair"
-# llm_runs 최신성 판단을 위해 날짜뿐 아니라 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-26_005324"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_r2_targeted_2slot_bounded_repair"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

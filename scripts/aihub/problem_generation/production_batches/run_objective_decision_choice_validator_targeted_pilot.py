@@ -8,14 +8,16 @@ PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
 
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
+
 from scripts.aihub.problem_generation.production_batches import (  # noqa: E402
     run_objective_decision_choice_validator_micro_pilot as micro,
 )
 
 
 VERSION_TAG = "decision_choice_validator_targeted_pilot_16"
-# llm_runs 정렬과 reviewer 최신성 확인을 위해 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-25_230405"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_r2_decision_choice_validator_targeted_pilot"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

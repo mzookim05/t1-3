@@ -7,9 +7,11 @@ import sys
 
 # production batch runner가 line 폴더로 분리되어도 공용 helper를 절대 import로 찾게 한다.
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[4]
+PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
+
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
 
 from scripts.aihub.problem_generation.shared.production_batch_common import (
     PROJECT_ROOT,
@@ -36,8 +38,8 @@ from scripts.aihub.problem_generation.shared.production_batch_common import (
 
 # 기존 `v2` strict-final을 덮어쓰지 않고, 같은 objective recipe로 남은 seed만 별도 생산 배치로 돌린다.
 VERSION_TAG = "pb1_objective"
-# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-22_164512"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_v2_default_production_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

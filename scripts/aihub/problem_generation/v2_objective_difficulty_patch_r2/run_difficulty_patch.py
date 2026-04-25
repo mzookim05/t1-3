@@ -9,6 +9,8 @@ PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
 
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
+
 from scripts.aihub.problem_generation.v2_objective_difficulty_patch import run_difficulty_patch as base
 
 
@@ -17,8 +19,8 @@ ORIGINAL_BUILD_RUN_MANIFEST = base.build_run_manifest
 ORIGINAL_LOAD_REFERENCE_V2_ROWS = base.load_reference_v2_rows
 
 VERSION_TAG = "v2_difficulty_patch_r2"
-# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-24_012725"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_nearmiss_refinement"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

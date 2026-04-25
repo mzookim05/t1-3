@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
@@ -10,8 +11,14 @@ from typing import Iterable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-RUN_STAMP = "2026-04-25_213841"
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
+
+
+# offline replay도 새 산출물을 만들 때는 실제 실행 시각으로 run stamp를 생성한다.
+RUN_STAMP = build_run_stamp()
 RUN_SLUG = "decision_choice_validator_offline_replay"
 RUN_NAME = f"{RUN_STAMP}_{RUN_SLUG}_objective_r2_decision_choice_validator_offline_replay"
 

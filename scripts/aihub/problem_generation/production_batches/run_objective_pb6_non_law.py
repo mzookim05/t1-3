@@ -12,13 +12,15 @@ PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
 
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
+
 from scripts.aihub.problem_generation.production_batches import run_objective_pb4 as pb4
 from scripts.aihub.problem_generation.production_batches import run_objective_pb5 as pb5
 
 
 VERSION_TAG = "pb6_non_law_objective_current_r2"
-# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-25_051819"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_r2_non_law_controlled_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 RUN_LABEL = "pb6 non-law"

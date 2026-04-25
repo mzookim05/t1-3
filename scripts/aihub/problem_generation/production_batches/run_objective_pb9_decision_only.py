@@ -16,6 +16,8 @@ PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
 
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
+
 from scripts.aihub.problem_generation.production_batches import (  # noqa: E402
     run_objective_decision_choice_validator_replay as validator_replay,
 )
@@ -25,8 +27,8 @@ from scripts.aihub.problem_generation.production_batches import (  # noqa: E402
 
 
 VERSION_TAG = "pb9_decision_only_controlled_production_with_choice_validator"
-# llm_runs 폴더 순서를 이름만으로 판단할 수 있게 HHMMSS까지 고정한다.
-RUN_DATE = "2026-04-26_024801"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_r2_decision_only_execution_mode_smoke_check"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

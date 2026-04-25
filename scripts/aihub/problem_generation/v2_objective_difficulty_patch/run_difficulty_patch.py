@@ -7,9 +7,11 @@ import sys
 
 # difficulty patch는 별도 line 폴더지만 production helper를 공유하므로 repo root 기반 절대 import로 연결한다.
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[4]
+PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT_FOR_IMPORT))
+
+from scripts.aihub.problem_generation.run_stamp import build_run_stamp  # noqa: E402
 
 from scripts.aihub.problem_generation.shared.production_batch_common import (
     PROJECT_ROOT,
@@ -37,8 +39,8 @@ from scripts.aihub.problem_generation.shared.production_batch_common import (
 
 # 이 실행선은 기존 `v2` 객관식 baseline을 덮어쓰지 않고, 같은 seed에서 난도/변별력만 보정한다.
 VERSION_TAG = "v2_difficulty_patch"
-# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
-RUN_DATE = "2026-04-23_175413"
+# llm_runs 이름은 실제 실행 시각과 맞아야 하므로 run stamp를 자동 생성한다.
+RUN_DATE = build_run_stamp()
 RUN_PURPOSE = "objective_nearmiss_refinement"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
