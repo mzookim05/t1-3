@@ -2,7 +2,18 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
+
+
+def find_project_root(start_dir):
+    # `explanation_generation`이 `problem_generation/` 아래로 이동한 뒤에도
+    # raw/data 경로가 흔들리지 않도록 `.git`이 있는 repo root를 기준점으로 삼는다.
+    for current in (start_dir, *start_dir.parents):
+        if (current / ".git").exists():
+            return current
+    return start_dir.parents[3]
+
+
+PROJECT_ROOT = find_project_root(SCRIPT_DIR)
 
 # `v7`은 `v6 strict final`의 표본을 그대로 재사용해,
 # 남은 `hard fail 4 + audit 1`을 줄이는 최소 안정화 런이다.

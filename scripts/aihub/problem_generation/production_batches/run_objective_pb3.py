@@ -17,10 +17,14 @@ from scripts.aihub.problem_generation.v2_objective_difficulty_patch_r2 import ru
 base = r2.base
 
 # explanation_generation 모듈들은 과거 실행 습관상 top-level `common`, `settings` import를 쓰므로,
-# 해당 폴더를 명시적으로 앞에 넣어 fresh seed 변환 로직을 그대로 재사용한다.
-EXPLANATION_DIR = base.PROJECT_ROOT / "scripts" / "aihub" / "explanation_generation"
-if str(EXPLANATION_DIR) not in sys.path:
-    sys.path.insert(0, str(EXPLANATION_DIR))
+# 구조 개편 후 경로와 legacy 경로를 순서대로 확인해 fresh seed 변환 로직을 그대로 재사용한다.
+EXPLANATION_DIR_CANDIDATES = [
+    base.PROJECT_ROOT / "scripts" / "aihub" / "problem_generation" / "explanation_generation",
+    base.PROJECT_ROOT / "scripts" / "aihub" / "explanation_generation",
+]
+for explanation_dir in reversed(EXPLANATION_DIR_CANDIDATES):
+    if explanation_dir.exists() and str(explanation_dir) not in sys.path:
+        sys.path.insert(0, str(explanation_dir))
 
 import common as explanation_common
 from extract_evidence_cards import build_card
