@@ -30,7 +30,8 @@ from transform_problems import build_transformed_sample
 
 
 VERSION_TAG = "pb3_objective_current_r2"
-RUN_DATE = "2026-04-24"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-24_190808"
 RUN_PURPOSE = "objective_r2_current_production_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
@@ -74,7 +75,7 @@ V7_SAMPLE_REGISTRY_PATH = (
     / "aihub"
     / "explanation_generation"
     / "llm_runs"
-    / "2026-04-14_v7_tail_stabilization_full_01_04"
+    / "2026-04-14_103340_v7_tail_stabilization_full_01_04"
     / "inputs"
     / "sample_registry_v7.csv"
 )

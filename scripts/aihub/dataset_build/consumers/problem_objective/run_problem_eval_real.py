@@ -258,7 +258,8 @@ def main():
     dev_rows = load_jsonl(dev_path)
     test_rows = load_jsonl(test_path)
 
-    run_name = args.run_name or f"{datetime.now().strftime('%Y-%m-%d')}_problem_{version_tag}_consumer_real_dual_retrieval_ranker"
+    # 같은 날짜에 여러 consumer run이 생겨도 폴더명만으로 실행 순서가 보이도록 초 단위까지 고정한다.
+    run_name = args.run_name or f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_problem_{version_tag}_consumer_real_dual_retrieval_ranker"
     run_dir = ANALYSIS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 

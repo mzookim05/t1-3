@@ -37,7 +37,8 @@ from scripts.aihub.problem_generation.shared.production_batch_common import (
 
 # 이 실행선은 기존 `v2` 객관식 baseline을 덮어쓰지 않고, 같은 seed에서 난도/변별력만 보정한다.
 VERSION_TAG = "v2_difficulty_patch"
-RUN_DATE = "2026-04-23"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-23_175413"
 RUN_PURPOSE = "objective_nearmiss_refinement"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
@@ -60,7 +61,7 @@ REFERENCE_V2_MERGED_PATH = (
     / "aihub"
     / "problem_generation"
     / "llm_runs"
-    / "2026-04-14_v2_qa_objective_single_best"
+    / "2026-04-14_203007_v2_qa_objective_single_best"
     / "merged"
     / "merged_problem_scores_v2.csv"
 )

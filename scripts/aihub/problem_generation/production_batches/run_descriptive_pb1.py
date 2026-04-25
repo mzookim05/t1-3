@@ -35,7 +35,8 @@ from scripts.aihub.problem_generation.shared.production_batch_common import (
 
 # 기존 `v3` strict-final을 건드리지 않고, 같은 split-descriptive recipe로 남은 seed만 별도 생산 배치로 돌린다.
 VERSION_TAG = "pb1_descriptive"
-RUN_DATE = "2026-04-22"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-22_164846"
 RUN_PURPOSE = "descriptive_v3_default_production_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
@@ -56,7 +57,7 @@ REFERENCE_MERGED_PATH = (
     / "aihub"
     / "problem_generation"
     / "llm_runs"
-    / "2026-04-22_v3_qa_split_descriptive_multiclause"
+    / "2026-04-22_134821_v3_qa_split_descriptive_multiclause"
     / "merged"
     / "merged_problem_scores_v3.csv"
 )

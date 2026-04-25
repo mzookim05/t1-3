@@ -7,7 +7,8 @@ PROJECT_ROOT = SCRIPT_DIR.parents[3]
 # `problem_generation v3`는 `v7_strict_final/train.jsonl` 안의 복수 질의형 seed를 다시 읽어,
 # 단일 쟁점 서술형으로 분리하는 첫 split-descriptive mainline이다.
 VERSION_TAG = "v3"
-RUN_DATE = "2026-04-22"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-22_134821"
 RUN_PURPOSE = "qa_split_descriptive_multiclause"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

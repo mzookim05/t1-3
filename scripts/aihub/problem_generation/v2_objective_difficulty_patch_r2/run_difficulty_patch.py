@@ -17,7 +17,8 @@ ORIGINAL_BUILD_RUN_MANIFEST = base.build_run_manifest
 ORIGINAL_LOAD_REFERENCE_V2_ROWS = base.load_reference_v2_rows
 
 VERSION_TAG = "v2_difficulty_patch_r2"
-RUN_DATE = "2026-04-24"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-24_012725"
 RUN_PURPOSE = "objective_nearmiss_refinement"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

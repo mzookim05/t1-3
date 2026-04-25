@@ -7,7 +7,8 @@ PROJECT_ROOT = SCRIPT_DIR.parents[3]
 # `problem_generation v1`은 `v7 strict final`을 seed pool로 삼아,
 # 설명형 서술형 문제 생성 축을 첫 prototype 수준으로 여는 실행이다.
 VERSION_TAG = "v1"
-RUN_DATE = "2026-04-14"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-14_183615"
 RUN_PURPOSE = "qa_descriptive_prototype"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 

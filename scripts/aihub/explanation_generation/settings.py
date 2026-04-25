@@ -7,7 +7,8 @@ PROJECT_ROOT = SCRIPT_DIR.parents[2]
 # `v7`은 `v6 strict final`의 표본을 그대로 재사용해,
 # 남은 `hard fail 4 + audit 1`을 줄이는 최소 안정화 런이다.
 VERSION_TAG = "v7"
-RUN_DATE = "2026-04-14"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-14_103340"
 RUN_PURPOSE = "tail_stabilization_full_01_04"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 RUN_DIR = PROJECT_ROOT / "analysis" / "aihub" / "explanation_generation" / "llm_runs" / RUN_NAME

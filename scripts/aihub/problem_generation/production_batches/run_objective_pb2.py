@@ -18,7 +18,8 @@ base = r2.base
 # `pb2`는 current default를 바로 교체하는 batch가 아니라,
 # `pb1` residual seed를 `r2` recipe로 다시 태워 production robustness를 보는 shadow candidate batch다.
 VERSION_TAG = "pb2_objective_candidate"
-RUN_DATE = "2026-04-24"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-24_025439"
 RUN_PURPOSE = "objective_r2_shadow_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
@@ -49,7 +50,7 @@ REFERENCE_PB1_MERGED_PATH = (
     / "aihub"
     / "problem_generation"
     / "llm_runs"
-    / "2026-04-22_pb1_objective_objective_v2_default_production_batch"
+    / "2026-04-22_164512_pb1_objective_objective_v2_default_production_batch"
     / "merged"
     / "merged_problem_scores_pb1_objective.csv"
 )

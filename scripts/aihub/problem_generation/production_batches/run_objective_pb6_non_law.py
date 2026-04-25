@@ -17,7 +17,8 @@ from scripts.aihub.problem_generation.production_batches import run_objective_pb
 
 
 VERSION_TAG = "pb6_non_law_objective_current_r2"
-RUN_DATE = "2026-04-25"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-25_051819"
 RUN_PURPOSE = "objective_r2_non_law_controlled_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 RUN_LABEL = "pb6 non-law"

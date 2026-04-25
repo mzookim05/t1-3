@@ -36,7 +36,8 @@ from scripts.aihub.problem_generation.shared.production_batch_common import (
 
 # 기존 `v2` strict-final을 덮어쓰지 않고, 같은 objective recipe로 남은 seed만 별도 생산 배치로 돌린다.
 VERSION_TAG = "pb1_objective"
-RUN_DATE = "2026-04-22"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-22_164512"
 RUN_PURPOSE = "objective_v2_default_production_batch"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
@@ -57,7 +58,7 @@ REFERENCE_MERGED_PATH = (
     / "aihub"
     / "problem_generation"
     / "llm_runs"
-    / "2026-04-14_v2_qa_objective_single_best"
+    / "2026-04-14_203007_v2_qa_objective_single_best"
     / "merged"
     / "merged_problem_scores_v2.csv"
 )

@@ -7,7 +7,8 @@ PROJECT_ROOT = SCRIPT_DIR.parents[3]
 # `problem_generation v2`는 설명형 서술형 `v1`을 유지한 채,
 # 첫 객관식 prototype을 별도 mainline으로 여는 실행이다.
 VERSION_TAG = "v2"
-RUN_DATE = "2026-04-14"
+# llm_runs 폴더 정렬을 위해 최초 생성 시각의 HHMMSS까지 run stamp에 고정한다.
+RUN_DATE = "2026-04-14_203007"
 RUN_PURPOSE = "qa_objective_single_best"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
@@ -37,7 +38,7 @@ REFERENCE_PROBLEM_V1_MERGED_PATH = (
     / "aihub"
     / "problem_generation"
     / "llm_runs"
-    / "2026-04-14_v1_qa_descriptive_prototype"
+    / "2026-04-14_183615_v1_qa_descriptive_prototype"
     / "merged"
     / "merged_problem_scores_v1.csv"
 )

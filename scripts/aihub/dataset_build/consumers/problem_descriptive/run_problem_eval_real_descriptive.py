@@ -373,7 +373,8 @@ def main():
     dev_summary = summarize_predictions("dev", dev_predictions)
     test_summary = summarize_predictions("test", test_predictions)
 
-    run_name = args.run_name or f"{datetime.now().strftime('%Y-%m-%d')}_problem_{version_tag}_consumer_real_descriptive_ranker"
+    # 같은 날짜에 여러 consumer run이 생겨도 폴더명만으로 실행 순서가 보이도록 초 단위까지 고정한다.
+    run_name = args.run_name or f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_problem_{version_tag}_consumer_real_descriptive_ranker"
     run_dir = ANALYSIS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 

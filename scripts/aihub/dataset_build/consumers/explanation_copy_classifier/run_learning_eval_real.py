@@ -274,7 +274,8 @@ def main():
     dev_summary = summarize_predictions("dev", dev_predictions)
     test_summary = summarize_predictions("test", test_predictions)
 
-    run_name = f"{datetime.now().strftime('%Y-%m-%d')}_{version_tag}_learning_eval_real_copyclf"
+    # 같은 날짜에 여러 consumer run이 생겨도 폴더명만으로 실행 순서가 보이도록 초 단위까지 고정한다.
+    run_name = f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_{version_tag}_learning_eval_real_copyclf"
     run_dir = ANALYSIS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
