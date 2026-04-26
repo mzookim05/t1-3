@@ -9,8 +9,8 @@ from itertools import combinations, product
 from pathlib import Path
 from typing import Any
 
-# `020803` no-API preflight reviewer sign-off 이후, 같은 28개 해석례 seed를 실제 API로 태우는 runner다.
-# generation/Judge는 candidate pool 전체에 수행하고, count 후보는 compiler가 strict final 16개만 조립한다.
+# no-API preflight reviewer sign-off 이후, 같은 해석례 seed registry를 실제 API로 태우는 runner다.
+# generation/Judge는 candidate pool 전체에 수행하고, count 후보는 compiler가 strict final package만 조립한다.
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
@@ -180,6 +180,8 @@ FINAL_SOURCE_COUNTS = {
     "04_TL_해석례_QA": 4,
 }
 FINAL_LANE_COUNTS = {"generalization_03_04": 8, "expansion_01_02": 8}
+FINAL_DEV_COUNT = 1
+FINAL_TEST_COUNT = 1
 CURRENT_OBJECTIVE_COUNT = {"usable": 183, "train": 144, "eval": 39, "audit": 6, "hard_fail": 5, "soft_fail": 3}
 
 PACKAGE_ROLE = "count_reflection_candidate_package"
@@ -193,6 +195,104 @@ NO = "아니오"
 ORIGINAL_FACTORY_CONFIGURE = factory.configure_globals
 ORIGINAL_FACTORY_BUILD_RUN_MANIFEST = factory.build_run_manifest
 ORIGINAL_FACTORY_BUILD_BATCH_SUMMARY = factory.build_batch_summary
+
+
+def refresh_paths() -> None:
+    # wrapper runner가 VERSION_TAG/RUN_NAME/source preflight를 바꿔도 모든 산출물 path가 같은 config를 보게 한다.
+    global SOURCE_PREFLIGHT_RUN_DIR, SOURCE_PREFLIGHT_RUN_NAME
+    global SOURCE_PREFLIGHT_TARGET_LABEL_SCHEDULE_PATH, SOURCE_PREFLIGHT_EXCLUSION_AUDIT_PATH
+    global SOURCE_PREFLIGHT_FINAL_PACKAGE_SPEC_CSV_PATH, SOURCE_PREFLIGHT_FINAL_PACKAGE_SPEC_MD_PATH
+    global SOURCE_PREFLIGHT_PACKAGE_COMPILER_CONTRACT_JSON_PATH, SOURCE_PREFLIGHT_PACKAGE_COMPILER_CONTRACT_MD_PATH
+    global INTERIM_DIR, PROCESSED_DIR, RUN_DIR, RUN_PROMPTS_DIR, RUN_INPUTS_DIR, RUN_GENERATIONS_DIR
+    global RUN_JUDGE_LOGS_DIR, RUN_MERGED_DIR, RUN_EXPORTS_DIR, RUN_LINTER_DIR, RUN_EVIDENCE_DIR
+    global SEED_REGISTRY_PATH, SEED_READY_PATH, SEED_PREFLIGHT_CSV_PATH, SEED_PREFLIGHT_MD_PATH
+    global TARGET_LABEL_SCHEDULE_CSV_PATH, RUN_MANIFEST_PATH, GENERATED_PROBLEMS_PATH, GROUNDING_LOG_PATH
+    global KEYEDNESS_LOG_PATH, DISTRACTORFIT_LOG_PATH, NEARMISS_LOG_PATH, RAW_MERGED_BEFORE_VALIDATOR_PATH
+    global CANDIDATE_MERGED_SCORES_PATH, MERGED_SCORES_PATH, PROBLEM_TRAIN_PATH, PROBLEM_DEV_PATH
+    global PROBLEM_TEST_PATH, PROBLEM_DATASET_MANIFEST_PATH, PROBLEM_AUDIT_QUEUE_PATH
+    global BATCH_SUMMARY_MD_PATH, BATCH_SUMMARY_CSV_PATH, BATCH_LANE_SUMMARY_CSV_PATH
+    global TAIL_MEMO_CSV_PATH, TAIL_MEMO_MD_PATH, CANDIDATE_VALIDATOR_REPORT_CSV_PATH
+    global CANDIDATE_VALIDATOR_REPORT_MD_PATH, VALIDATOR_REPORT_CSV_PATH, VALIDATOR_REPORT_MD_PATH
+    global VALIDATOR_WIRING_CHECK_MD_PATH, PILOT_BREAKOUT_CSV_PATH, PILOT_BREAKOUT_MD_PATH
+    global MANIFEST_HEADER_GATE_MD_PATH, FINAL_PACKAGE_CSV_PATH, FINAL_PACKAGE_MD_PATH, COMPILER_SUMMARY_MD_PATH
+    global CANDIDATE_POOL_PATH, ACCEPTED_POOL_PATH, REJECTED_POOL_PATH, TAIL_TAXONOMY_PATH
+    global QUOTA_SURPLUS_POOL_PATH, COMPILER_MANIFEST_PATH, ARTIFACT_LINTER_FIXTURE_MANIFEST_PATH
+    global EVIDENCE_CARD_PACKAGE_MANIFEST_PATH
+
+    SOURCE_PREFLIGHT_RUN_DIR = resolve_source_preflight_run_dir()
+    SOURCE_PREFLIGHT_RUN_NAME = SOURCE_PREFLIGHT_RUN_DIR.name
+    SOURCE_PREFLIGHT_TARGET_LABEL_SCHEDULE_PATH = (
+        SOURCE_PREFLIGHT_RUN_DIR / "exports" / f"target_label_schedule_{SOURCE_PREFLIGHT_VERSION_TAG}.csv"
+    )
+    SOURCE_PREFLIGHT_EXCLUSION_AUDIT_PATH = SOURCE_PREFLIGHT_RUN_DIR / "exports" / f"exclusion_audit_{SOURCE_PREFLIGHT_VERSION_TAG}.md"
+    SOURCE_PREFLIGHT_FINAL_PACKAGE_SPEC_CSV_PATH = (
+        SOURCE_PREFLIGHT_RUN_DIR / "exports" / f"final_package_spec_{SOURCE_PREFLIGHT_VERSION_TAG}.csv"
+    )
+    SOURCE_PREFLIGHT_FINAL_PACKAGE_SPEC_MD_PATH = (
+        SOURCE_PREFLIGHT_RUN_DIR / "exports" / f"final_package_spec_{SOURCE_PREFLIGHT_VERSION_TAG}.md"
+    )
+    SOURCE_PREFLIGHT_PACKAGE_COMPILER_CONTRACT_JSON_PATH = (
+        SOURCE_PREFLIGHT_RUN_DIR / "exports" / f"package_compiler_contract_{SOURCE_PREFLIGHT_VERSION_TAG}.json"
+    )
+    SOURCE_PREFLIGHT_PACKAGE_COMPILER_CONTRACT_MD_PATH = (
+        SOURCE_PREFLIGHT_RUN_DIR / "exports" / f"package_compiler_contract_{SOURCE_PREFLIGHT_VERSION_TAG}.md"
+    )
+
+    INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "problem_generation" / "production_batches" / VERSION_TAG
+    PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "aihub" / "problem_generation" / "production_batches" / VERSION_TAG
+    RUN_DIR = PROJECT_ROOT / "analysis" / "aihub" / "problem_generation" / "llm_runs" / RUN_NAME
+    RUN_PROMPTS_DIR = RUN_DIR / "prompts"
+    RUN_INPUTS_DIR = RUN_DIR / "inputs"
+    RUN_GENERATIONS_DIR = RUN_DIR / "generations"
+    RUN_JUDGE_LOGS_DIR = RUN_DIR / "judge_logs"
+    RUN_MERGED_DIR = RUN_DIR / "merged"
+    RUN_EXPORTS_DIR = RUN_DIR / "exports"
+    RUN_LINTER_DIR = RUN_DIR / "linter"
+    RUN_EVIDENCE_DIR = RUN_DIR / "evidence_card"
+
+    SEED_REGISTRY_PATH = INTERIM_DIR / "seed_registry.csv"
+    SEED_READY_PATH = INTERIM_DIR / "seed_ready.jsonl"
+    SEED_PREFLIGHT_CSV_PATH = RUN_EXPORTS_DIR / f"seed_preflight_{VERSION_TAG}.csv"
+    SEED_PREFLIGHT_MD_PATH = RUN_EXPORTS_DIR / f"seed_preflight_{VERSION_TAG}.md"
+    TARGET_LABEL_SCHEDULE_CSV_PATH = RUN_EXPORTS_DIR / f"target_label_schedule_{VERSION_TAG}.csv"
+    RUN_MANIFEST_PATH = RUN_DIR / "run_manifest.json"
+    GENERATED_PROBLEMS_PATH = RUN_GENERATIONS_DIR / f"generated_problems_{VERSION_TAG}.jsonl"
+    GROUNDING_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_grounding_{VERSION_TAG}.jsonl"
+    KEYEDNESS_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_keyedness_{VERSION_TAG}.jsonl"
+    DISTRACTORFIT_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_distractorfit_{VERSION_TAG}.jsonl"
+    NEARMISS_LOG_PATH = RUN_JUDGE_LOGS_DIR / f"judge_nearmiss_{VERSION_TAG}.jsonl"
+    RAW_MERGED_BEFORE_VALIDATOR_PATH = RUN_MERGED_DIR / f"raw_merged_problem_scores_before_validator_{VERSION_TAG}.csv"
+    CANDIDATE_MERGED_SCORES_PATH = RUN_MERGED_DIR / f"candidate_merged_problem_scores_{VERSION_TAG}.csv"
+    MERGED_SCORES_PATH = RUN_MERGED_DIR / f"merged_problem_scores_{VERSION_TAG}.csv"
+    PROBLEM_TRAIN_PATH = PROCESSED_DIR / "train.jsonl"
+    PROBLEM_DEV_PATH = PROCESSED_DIR / "dev.jsonl"
+    PROBLEM_TEST_PATH = PROCESSED_DIR / "test.jsonl"
+    PROBLEM_DATASET_MANIFEST_PATH = PROCESSED_DIR / "dataset_manifest.csv"
+    PROBLEM_AUDIT_QUEUE_PATH = PROCESSED_DIR / "audit_queue.csv"
+    BATCH_SUMMARY_MD_PATH = RUN_EXPORTS_DIR / f"batch_summary_{VERSION_TAG}.md"
+    BATCH_SUMMARY_CSV_PATH = RUN_EXPORTS_DIR / f"batch_summary_{VERSION_TAG}.csv"
+    BATCH_LANE_SUMMARY_CSV_PATH = RUN_EXPORTS_DIR / f"batch_lane_summary_{VERSION_TAG}.csv"
+    TAIL_MEMO_CSV_PATH = RUN_EXPORTS_DIR / f"tail_memo_{VERSION_TAG}.csv"
+    TAIL_MEMO_MD_PATH = RUN_EXPORTS_DIR / f"tail_memo_{VERSION_TAG}.md"
+    CANDIDATE_VALIDATOR_REPORT_CSV_PATH = RUN_EXPORTS_DIR / f"candidate_validator_report_{VERSION_TAG}.csv"
+    CANDIDATE_VALIDATOR_REPORT_MD_PATH = RUN_EXPORTS_DIR / f"candidate_validator_report_{VERSION_TAG}.md"
+    VALIDATOR_REPORT_CSV_PATH = RUN_EXPORTS_DIR / f"validator_report_{VERSION_TAG}.csv"
+    VALIDATOR_REPORT_MD_PATH = RUN_EXPORTS_DIR / f"validator_report_{VERSION_TAG}.md"
+    VALIDATOR_WIRING_CHECK_MD_PATH = RUN_EXPORTS_DIR / f"validator_wiring_check_{VERSION_TAG}.md"
+    PILOT_BREAKOUT_CSV_PATH = RUN_EXPORTS_DIR / f"pilot_breakout_{VERSION_TAG}.csv"
+    PILOT_BREAKOUT_MD_PATH = RUN_EXPORTS_DIR / f"pilot_breakout_{VERSION_TAG}.md"
+    MANIFEST_HEADER_GATE_MD_PATH = RUN_EXPORTS_DIR / f"manifest_header_gate_{VERSION_TAG}.md"
+    FINAL_PACKAGE_CSV_PATH = RUN_EXPORTS_DIR / f"final_package_{VERSION_TAG}.csv"
+    FINAL_PACKAGE_MD_PATH = RUN_EXPORTS_DIR / f"final_package_{VERSION_TAG}.md"
+    COMPILER_SUMMARY_MD_PATH = RUN_EXPORTS_DIR / f"compiler_summary_{VERSION_TAG}.md"
+    CANDIDATE_POOL_PATH = RUN_DIR / "candidate_pool.csv"
+    ACCEPTED_POOL_PATH = RUN_DIR / "accepted_pool.csv"
+    REJECTED_POOL_PATH = RUN_DIR / "rejected_pool.csv"
+    TAIL_TAXONOMY_PATH = RUN_DIR / "tail_taxonomy.csv"
+    QUOTA_SURPLUS_POOL_PATH = RUN_DIR / "quota_surplus_pool.csv"
+    COMPILER_MANIFEST_PATH = RUN_DIR / "compiler_manifest.json"
+    ARTIFACT_LINTER_FIXTURE_MANIFEST_PATH = RUN_DIR / "artifact_linter_fixture_manifest.json"
+    EVIDENCE_CARD_PACKAGE_MANIFEST_PATH = RUN_DIR / "evidence_card_package_manifest.json"
 
 
 def repo_rel(path: Path) -> str:
@@ -252,10 +352,10 @@ def write_seed_preflight_copy(seed_rows: list[dict[str, str]]) -> None:
         "## checks",
         "| check | result |",
         "| --- | --- |",
-        "| same 28 seed registry as no-API preflight | `pass` |",
-        "| source split is 01/02/03/04 each 7 | `pass` |",
-        "| lane split is 14/14 | `pass` |",
-        "| target label schedule is A/B/C/D = 7/7/7/7 | `pass` |",
+        f"| same {EXPECTED_CANDIDATE_SEED_COUNT} seed registry as no-API preflight | `pass` |",
+        f"| source split is `{dict(counts['source'])}` | `pass` |",
+        f"| lane split is `{dict(counts['lane'])}` | `pass` |",
+        f"| target label schedule is `{dict(counts['label'])}` | `pass` |",
         "| count fields are candidate-not-counted aliases | `pass` |",
     ]
     pb6.pb4.pb3.base.write_text_atomic(SEED_PREFLIGHT_MD_PATH, "\n".join(lines) + "\n")
@@ -264,17 +364,17 @@ def write_seed_preflight_copy(seed_rows: list[dict[str, str]]) -> None:
 
 
 def write_validator_wiring_check_md() -> None:
-    # 해석례 overgeneration은 preflight 28개와 final 16개가 다르므로,
-    # 기존 해석례 repair pilot의 16개 wiring 문구를 그대로 쓰면 provenance가 흐려진다.
+    # 해석례 overgeneration은 preflight candidate와 final package quota가 다르므로,
+    # 기존 해석례 repair pilot의 fixed-size wiring 문구를 그대로 쓰면 provenance가 흐려진다.
     lines = [
         f"# validator wiring check `{VERSION_TAG}`",
         "",
         "| check | result | note |",
         "| --- | --- | --- |",
-        "| fixed preflight seed registry reused | `pass` | no-API preflight 28개와 같은 seed registry 사용 |",
-        "| candidate target label schedule | `pass` | candidate target `A/B/C/D = 7/7/7/7` 적용 |",
-        "| final export label schedule | `pass` | final export `A/B/C/D = 4/4/4/4` 적용 |",
-        "| source preflight provenance | `pass` | `020803` seed registry `28개`를 고정 입력으로 사용 |",
+        f"| fixed preflight seed registry reused | `pass` | no-API preflight {EXPECTED_CANDIDATE_SEED_COUNT}개와 같은 seed registry 사용 |",
+        f"| candidate target label schedule | `pass` | candidate target `{CANDIDATE_TARGET_LABEL_COUNTS}` 적용 |",
+        f"| final export label schedule | `pass` | final export `{FINAL_TARGET_LABEL_COUNTS}` 적용 |",
+        f"| source preflight provenance | `pass` | `{SOURCE_PREFLIGHT_RUN_NAME}` seed registry `{EXPECTED_CANDIDATE_SEED_COUNT}개`를 고정 입력으로 사용 |",
         "| interpretation gate fields | `pass` | `answer_uniqueness`, `condition_preservation`, `response_scope_limited`, `answer_reason_split`, `source_only_fact`, `distractor_direction`, `same_direction_distractor` 기록 |",
         "| downstream guard fields | `pass` | `validator_reason_short`, `split_allowed`, `count_allowed` 기록 |",
         "| count reflection | `pass` | reviewer sign-off 전 core current count 미변경 |",
@@ -286,8 +386,8 @@ def build_generation_messages(seed: dict[str, str], reference_v2: dict[str, str]
     messages = interpretation_pilot.BASE_BUILD_GENERATION_MESSAGES(seed, reference_v2)
     messages[1]["content"] += f"""
 
-## interpretation small overgeneration pilot 추가 지시
-- 이번 run은 `해석례_QA` candidate 28개를 생성한 뒤 strict final package 16개만 컴파일하는 package factory API pilot이다.
+## interpretation overgeneration pilot 추가 지시
+- 이번 run은 `해석례_QA` candidate {EXPECTED_CANDIDATE_SEED_COUNT}개를 생성한 뒤 strict final package {FINAL_PACKAGE_TARGET_COUNT}개만 컴파일하는 package factory API pilot이다.
 - seed action은 `{seed.get('interpretation_seed_action', '')}`, interpretation axis는 `{seed.get('interpretation_axis', '')}`, risk flags는 `{seed.get('interpretation_risk_flags', '')}`다.
 - stem은 회답 결론, 전제조건, 예외, 적용범위 중 정확히 하나의 predicate만 묻는다.
 - 회답 결론과 회답 이유를 한 stem에서 동시에 묻지 않는다. 이유는 선택지 변별 축으로만 사용한다.
@@ -324,7 +424,7 @@ def strict_accept_reason(row: dict[str, str]) -> str:
 
 
 def find_final_combination(accepted_rows: list[dict[str, str]]) -> set[str]:
-    # 28개 후보는 source별 7개 중 4개씩 고르는 product search로 줄여 exact source/label/lane quota를 결정한다.
+    # source/label별 조합 탐색으로 exact source/label/lane quota를 만족하는 final package를 결정한다.
     rows_by_source = {
         source: sorted(
             [row for row in accepted_rows if row.get("source_subset") == source],
@@ -375,15 +475,26 @@ def write_linter_and_evidence_manifests() -> None:
         ARTIFACT_LINTER_FIXTURE_MANIFEST_PATH,
         {
             "fixture_version": "interpretation_small_overgeneration_candidate_v1",
-            "description": "Live candidate package check for interpretation small overgeneration pilot.",
+            "description": f"Live candidate package check for {VERSION_TAG}.",
             "fixtures": [
                 {
-                    "fixture_id": "interpretation_small_overgeneration_candidate_package_pass",
+                    "fixture_id": f"{VERSION_TAG}_candidate_package_pass",
                     "artifact_role": PACKAGE_ROLE,
                     "fixture_mode": "live_artifact_check",
                     "expected_result": "pass",
                     "expected_failure_code": "",
                     "expected_failure_codes": [],
+                    "validator_wiring_expectations": {
+                        "required_phrases": [
+                            f"no-API preflight {EXPECTED_CANDIDATE_SEED_COUNT}개와 같은 seed registry 사용",
+                            f"candidate target `{CANDIDATE_TARGET_LABEL_COUNTS}`",
+                            f"final export `{FINAL_TARGET_LABEL_COUNTS}`",
+                        ],
+                        "stale_phrases": [
+                            "no-API preflight 16개",
+                            "`A/B/C/D = 4/4/4/4` target 적용",
+                        ],
+                    },
                     "paths": linter_paths,
                 }
             ],
@@ -393,7 +504,7 @@ def write_linter_and_evidence_manifests() -> None:
         EVIDENCE_CARD_PACKAGE_MANIFEST_PATH,
         {
             "manifest_version": "evidence_card_candidate_v1",
-            "description": "Interpretation small overgeneration candidate package evidence card input.",
+            "description": f"{VERSION_TAG} candidate package evidence card input.",
             "count_context": {
                 "current_usable": CURRENT_OBJECTIVE_COUNT["usable"],
                 "current_train": CURRENT_OBJECTIVE_COUNT["train"],
@@ -407,9 +518,12 @@ def write_linter_and_evidence_manifests() -> None:
                     "package_role": PACKAGE_ROLE,
                     "run_dir": repo_rel(RUN_DIR),
                     "processed_package_dir": repo_rel(PROCESSED_DIR),
-                    "linter_fixture_id": "interpretation_small_overgeneration_candidate_package_pass",
+                    "linter_fixture_id": f"{VERSION_TAG}_candidate_package_pass",
                     "linter_report_dir": repo_rel(RUN_LINTER_DIR),
-                    "source_chain": f"{SOURCE_PREFLIGHT_RUN_NAME} -> 28 candidate API execution -> strict final 16 compiler",
+                    "source_chain": (
+                        f"{SOURCE_PREFLIGHT_RUN_NAME} -> {EXPECTED_CANDIDATE_SEED_COUNT} candidate API execution "
+                        f"-> strict final {FINAL_PACKAGE_TARGET_COUNT} compiler"
+                    ),
                 }
             ],
         },
@@ -481,7 +595,7 @@ def build_run_manifest(
     current_manifest = json.loads(RUN_MANIFEST_PATH.read_text(encoding="utf-8")) if RUN_MANIFEST_PATH.exists() else manifest
     current_manifest.update(
         {
-            "candidate_recipe_source": "v2_difficulty_patch_r2_interpretation_small_overgeneration_pilot",
+            "candidate_recipe_source": f"v2_difficulty_patch_r2_{VERSION_TAG}",
             "seed_registry_strategy": f"fixed_from_{SOURCE_PREFLIGHT_RUN_NAME}",
             "source_preflight_version_tag": SOURCE_PREFLIGHT_VERSION_TAG,
             "source_preflight_run_name": SOURCE_PREFLIGHT_RUN_NAME,
@@ -578,6 +692,8 @@ def patch_factory_constants() -> None:
         "RUN_PURPOSE": RUN_PURPOSE,
         "RUN_NAME": RUN_NAME,
         "RUN_LABEL": RUN_LABEL,
+        "SOURCE_PREFLIGHT_VERSION_TAG": SOURCE_PREFLIGHT_VERSION_TAG,
+        "SOURCE_PREFLIGHT_RUN_PURPOSE": SOURCE_PREFLIGHT_RUN_PURPOSE,
         "SOURCE_PREFLIGHT_RUN_NAME": SOURCE_PREFLIGHT_RUN_NAME,
         "SOURCE_PREFLIGHT_RUN_DIR": SOURCE_PREFLIGHT_RUN_DIR,
         "SOURCE_PREFLIGHT_SEED_REGISTRY_PATH": SOURCE_PREFLIGHT_SEED_REGISTRY_PATH,
@@ -650,6 +766,8 @@ def patch_factory_constants() -> None:
         "FINAL_TARGET_LABEL_COUNTS": FINAL_TARGET_LABEL_COUNTS,
         "FINAL_SOURCE_COUNTS": FINAL_SOURCE_COUNTS,
         "FINAL_LANE_COUNTS": FINAL_LANE_COUNTS,
+        "FINAL_DEV_COUNT": FINAL_DEV_COUNT,
+        "FINAL_TEST_COUNT": FINAL_TEST_COUNT,
         "PACKAGE_ROLE": PACKAGE_ROLE,
         "CANDIDATE_BATCH_STATUS": CANDIDATE_BATCH_STATUS,
         "CANDIDATE_REFLECTION_STATUS": CANDIDATE_REFLECTION_STATUS,
@@ -669,16 +787,17 @@ def patch_factory_constants() -> None:
 
 
 def configure_globals() -> None:
+    refresh_paths()
     patch_factory_constants()
     ORIGINAL_FACTORY_CONFIGURE()
     # 기존 factory의 judgment 문자열은 reviewer-facing provenance를 흐리므로 해석례 run identity로 다시 덮어쓴다.
-    interpretation_pilot.BATCH_STATUS = "interpretation_small_overgeneration_candidate_validated_not_compiled"
+    interpretation_pilot.BATCH_STATUS = f"{VERSION_TAG}_candidate_validated_not_compiled"
     interpretation_pilot.COUNT_REFLECTION_STATUS = CANDIDATE_REFLECTION_STATUS
     interpretation_pilot.DOWNSTREAM_CONSUMPTION_ALLOWED = NO
     pb6.RUN_LABEL = RUN_LABEL
-    pb6.CANDIDATE_RECIPE_SOURCE = "v2_difficulty_patch_r2_interpretation_small_overgeneration_pilot"
+    pb6.CANDIDATE_RECIPE_SOURCE = f"v2_difficulty_patch_r2_{VERSION_TAG}"
     pb6.SEED_REGISTRY_STRATEGY = f"fixed_from_{SOURCE_PREFLIGHT_RUN_NAME}"
-    pb6.LAW_STATUS_NOTE = "interpretation_small_overgeneration_candidate_not_counted_until_signoff"
+    pb6.LAW_STATUS_NOTE = f"{VERSION_TAG}_candidate_not_counted_until_signoff"
     pb6.pb4.pb3.base.split_dataset = split_dataset_with_overgeneration_compiler
 
 

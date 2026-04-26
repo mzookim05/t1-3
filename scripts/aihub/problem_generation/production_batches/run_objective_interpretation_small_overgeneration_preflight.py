@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 # 이 runner는 해석례_QA에 package factory를 적용하기 전 no-API stop line이다.
-# API 비용을 쓰기 전에 candidate 28개와 final 16개 quota, exclusion, validator/source contract를 먼저 잠근다.
+# API 비용을 쓰기 전에 candidate/final quota, exclusion, validator/source contract를 먼저 잠근다.
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT_FOR_IMPORT = SCRIPT_DIR.parents[3]
 if str(PROJECT_ROOT_FOR_IMPORT) not in sys.path:
@@ -51,6 +51,11 @@ RUN_MANIFEST_PATH = RUN_DIR / "run_manifest.json"
 
 EXPECTED_CANDIDATE_SEED_COUNT = 28
 FINAL_PACKAGE_TARGET_COUNT = 16
+SEED_ID_PREFIX = "interpretation_overgen_preflight"
+SEED_SELECTION_ROLE = "objective_interpretation_small_overgeneration_candidate_seed"
+SEED_SELECTION_NOTE = "해석례_QA package factory no-API candidate seed"
+SEED_FILTER_NOTE = "interpretation_only_small_overgeneration_seed_filter"
+NON_LAW_SCOPE_NOTE = "interpretation_small_overgeneration_preflight_no_api_candidate_not_counted"
 EXPECTED_DOC_TYPE_COUNTS = {"해석례_QA": 28}
 EXPECTED_LANE_BY_DOC = {
     ("해석례_QA", "generalization_03_04"): 14,
@@ -99,6 +104,44 @@ VALIDATOR_REQUIRED_FIELDS = [
     "final_package_selected",
     "quota_surplus_reason",
 ]
+
+
+def expected_lane_counts() -> dict[str, int]:
+    # wrapper가 candidate 규모를 바꿔도 reviewer-facing lane 총량을 같은 기준으로 렌더링한다.
+    counts: Counter[str] = Counter()
+    for (_doc_type, lane), count in EXPECTED_LANE_BY_DOC.items():
+        counts[lane] += count
+    return dict(counts)
+
+
+def refresh_paths() -> None:
+    # medium wrapper가 VERSION_TAG/RUN_NAME을 바꿀 때 small runner의 artifact path가 stale해지지 않도록 재계산한다.
+    global INTERIM_DIR, RUN_DIR, RUN_INPUTS_DIR, RUN_EXPORTS_DIR
+    global SEED_REGISTRY_PATH, SEED_READY_PATH, SEED_PREFLIGHT_CSV_PATH, SEED_PREFLIGHT_MD_PATH
+    global EXCLUSION_AUDIT_CSV_PATH, EXCLUSION_AUDIT_MD_PATH, TARGET_LABEL_SCHEDULE_CSV_PATH
+    global FINAL_PACKAGE_SPEC_CSV_PATH, FINAL_PACKAGE_SPEC_MD_PATH, VALIDATOR_SCHEMA_CSV_PATH
+    global VALIDATOR_SCHEMA_MD_PATH, SOURCE_FIELD_CONTRACT_CSV_PATH, SOURCE_FIELD_CONTRACT_MD_PATH
+    global PACKAGE_COMPILER_CONTRACT_JSON_PATH, PACKAGE_COMPILER_CONTRACT_MD_PATH, RUN_MANIFEST_PATH
+    INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "problem_generation" / "production_batches" / VERSION_TAG
+    RUN_DIR = PROJECT_ROOT / "analysis" / "aihub" / "problem_generation" / "llm_runs" / RUN_NAME
+    RUN_INPUTS_DIR = RUN_DIR / "inputs"
+    RUN_EXPORTS_DIR = RUN_DIR / "exports"
+    SEED_REGISTRY_PATH = INTERIM_DIR / "seed_registry.csv"
+    SEED_READY_PATH = INTERIM_DIR / "seed_ready.jsonl"
+    SEED_PREFLIGHT_CSV_PATH = RUN_EXPORTS_DIR / f"seed_preflight_{VERSION_TAG}.csv"
+    SEED_PREFLIGHT_MD_PATH = RUN_EXPORTS_DIR / f"seed_preflight_{VERSION_TAG}.md"
+    EXCLUSION_AUDIT_CSV_PATH = RUN_EXPORTS_DIR / f"exclusion_audit_{VERSION_TAG}.csv"
+    EXCLUSION_AUDIT_MD_PATH = RUN_EXPORTS_DIR / f"exclusion_audit_{VERSION_TAG}.md"
+    TARGET_LABEL_SCHEDULE_CSV_PATH = RUN_EXPORTS_DIR / f"target_label_schedule_{VERSION_TAG}.csv"
+    FINAL_PACKAGE_SPEC_CSV_PATH = RUN_EXPORTS_DIR / f"final_package_spec_{VERSION_TAG}.csv"
+    FINAL_PACKAGE_SPEC_MD_PATH = RUN_EXPORTS_DIR / f"final_package_spec_{VERSION_TAG}.md"
+    VALIDATOR_SCHEMA_CSV_PATH = RUN_EXPORTS_DIR / f"validator_report_schema_{VERSION_TAG}.csv"
+    VALIDATOR_SCHEMA_MD_PATH = RUN_EXPORTS_DIR / f"validator_report_schema_{VERSION_TAG}.md"
+    SOURCE_FIELD_CONTRACT_CSV_PATH = RUN_EXPORTS_DIR / f"source_field_contract_{VERSION_TAG}.csv"
+    SOURCE_FIELD_CONTRACT_MD_PATH = RUN_EXPORTS_DIR / f"source_field_contract_{VERSION_TAG}.md"
+    PACKAGE_COMPILER_CONTRACT_JSON_PATH = RUN_EXPORTS_DIR / f"package_compiler_contract_{VERSION_TAG}.json"
+    PACKAGE_COMPILER_CONTRACT_MD_PATH = RUN_EXPORTS_DIR / f"package_compiler_contract_{VERSION_TAG}.md"
+    RUN_MANIFEST_PATH = RUN_DIR / "run_manifest.json"
 
 
 def write_csv(path: Path, rows: list[dict[str, str]], fieldnames: list[str]) -> None:
@@ -206,10 +249,13 @@ def collect_excluded_rows() -> list[dict[str, str]]:
 
 def build_seed_row(record: dict) -> dict[str, str]:
     row = ORIGINAL_PB6_BUILD_SEED_ROW(record)
-    row["selection_role"] = "objective_interpretation_small_overgeneration_candidate_seed"
-    row["selection_note"] = "해석례_QA package factory no-API candidate seed; target 16 final package를 위해 candidate 28개를 먼저 고정"
-    row["pb6_seed_filter_note"] = "interpretation_only_small_overgeneration_seed_filter"
-    row["non_law_scope_note"] = "interpretation_small_overgeneration_preflight_no_api_candidate_not_counted"
+    row["selection_role"] = SEED_SELECTION_ROLE
+    row["selection_note"] = (
+        f"{SEED_SELECTION_NOTE}; target {FINAL_PACKAGE_TARGET_COUNT} final package를 위해 "
+        f"candidate {EXPECTED_CANDIDATE_SEED_COUNT}개를 먼저 고정"
+    )
+    row["pb6_seed_filter_note"] = SEED_FILTER_NOTE
+    row["non_law_scope_note"] = NON_LAW_SCOPE_NOTE
     row["package_candidate_role"] = "candidate_pool"
     row["count_reflection_status"] = "candidate_not_counted"
     return row
@@ -237,11 +283,14 @@ def configure_seed_selector() -> None:
     pb6.RUN_PURPOSE = RUN_PURPOSE
     pb6.RUN_NAME = RUN_NAME
     pb6.RUN_LABEL = RUN_LABEL
-    pb6.SEED_ID_PREFIX = "interpretation_overgen_preflight"
-    pb6.SEED_SELECTION_ROLE = "objective_interpretation_small_overgeneration_candidate_seed"
-    pb6.SEED_SELECTION_NOTE = "해석례_QA package factory no-API candidate seed"
-    pb6.SEED_FILTER_NOTE = "interpretation_only_small_overgeneration_seed_filter"
-    pb6.SCOPE_NOTE = "해석례_QA only; API 전 candidate 28 / final 16 seed-spec-wiring check"
+    pb6.SEED_ID_PREFIX = SEED_ID_PREFIX
+    pb6.SEED_SELECTION_ROLE = SEED_SELECTION_ROLE
+    pb6.SEED_SELECTION_NOTE = SEED_SELECTION_NOTE
+    pb6.SEED_FILTER_NOTE = SEED_FILTER_NOTE
+    pb6.SCOPE_NOTE = (
+        f"해석례_QA only; API 전 candidate {EXPECTED_CANDIDATE_SEED_COUNT} / "
+        f"final {FINAL_PACKAGE_TARGET_COUNT} seed-spec-wiring check"
+    )
     pb6.EXPECTED_TOTAL_SEED_COUNT = EXPECTED_CANDIDATE_SEED_COUNT
     pb6.EXPECTED_DOC_TYPE_COUNTS = EXPECTED_DOC_TYPE_COUNTS
     pb6.EXPECTED_LANE_BY_DOC = EXPECTED_LANE_BY_DOC
@@ -249,7 +298,7 @@ def configure_seed_selector() -> None:
     pb6.PB6_DATASET_SPECS = pb6.build_pb6_dataset_specs()
     pb6.OVERLAP_CHECK_LABEL = "no current/candidate/failed/held-out/audit/tail overlap"
     pb6.EXCLUSION_WORDING_LINES = [
-        "`197`은 current counted objective seed package pool이다.",
+        f"`{sum(COUNTED_EXCLUSION_COMPONENTS.values())}`은 current counted objective seed package pool이다.",
         "failed/candidate/intermediate seen seed도 제외해 해석례 package factory pilot의 fresh seed 성격을 유지한다.",
     ]
     pb6.INTERIM_DIR = INTERIM_DIR
@@ -328,12 +377,12 @@ def write_preflight_report(seed_rows: list[dict[str, str]], preflight_rows: list
         "## checks",
         "| check | result |",
         "| --- | --- |",
-        "| candidate seed count is 28 | `pass` |",
-        "| final package target is 16 | `pass` |",
+        f"| candidate seed count is {EXPECTED_CANDIDATE_SEED_COUNT} | `pass` |",
+        f"| final package target is {FINAL_PACKAGE_TARGET_COUNT} | `pass` |",
         "| doc type is 해석례_QA only | `pass` |",
-        "| candidate source split is 01/02/03/04 = 7/7/7/7 | `pass` |",
-        "| candidate lane split is 14/14 | `pass` |",
-        "| candidate target label schedule is A/B/C/D = 7/7/7/7 | `pass` |",
+        f"| candidate source split is `{dict(source_counts)}` | `pass` |",
+        f"| candidate lane split is `{dict(lane_counts)}` | `pass` |",
+        f"| candidate target label schedule is `{dict(target_counts)}` | `pass` |",
         "| no batch duplicate | `pass` |",
         "| no prior/candidate/failed/held-out/audit/tail overlap | `pass` |",
         "| source field contract fields checked | `pass` |",
@@ -378,7 +427,11 @@ def write_final_package_spec() -> None:
             {"quota_type": "final_gate", "quota_key": "audit", "target_count": "0"},
             {"quota_type": "final_gate", "quota_key": "metadata_mismatch", "target_count": "0"},
             {"quota_type": "final_gate", "quota_key": "shuffle_mismatch", "target_count": "0"},
-            {"quota_type": "final_gate", "quota_key": "validator_accept_export_ready", "target_count": "16"},
+            {
+                "quota_type": "final_gate",
+                "quota_key": "validator_accept_export_ready",
+                "target_count": str(FINAL_PACKAGE_TARGET_COUNT),
+            },
         ]
     )
     write_csv(FINAL_PACKAGE_SPEC_CSV_PATH, rows, ["quota_type", "quota_key", "target_count"])
@@ -462,7 +515,7 @@ def write_package_compiler_contract() -> None:
         "candidate_quota": {
             "doc_type_counts": EXPECTED_DOC_TYPE_COUNTS,
             "source_subset_counts": INTERPRETATION_SOURCE_COUNTS,
-            "lane_counts": {"generalization_03_04": 14, "expansion_01_02": 14},
+            "lane_counts": expected_lane_counts(),
             "target_label_counts": CANDIDATE_TARGET_LABEL_COUNTS,
         },
         "final_package_quota": {
@@ -590,8 +643,8 @@ def write_exclusion_audit(seed_rows: list[dict[str, str]]) -> dict[str, int]:
         [
             "",
             "## interpretation",
-            "- `overlap_count = 0` means the current 28 interpretation overgeneration preflight seeds did not overlap with that source group by `seed_sample_id`, `reference_sample_id`, `family_id`, `label_path`, or `raw_path`.",
-            "- The named `197` pool is the current counted/package seed pool; this audit also checks failed/candidate/intermediate artifacts to avoid hidden seed reuse before API execution.",
+            f"- `overlap_count = 0` means the current {EXPECTED_CANDIDATE_SEED_COUNT} interpretation overgeneration preflight seeds did not overlap with that source group by `seed_sample_id`, `reference_sample_id`, `family_id`, `label_path`, or `raw_path`.",
+            f"- The named `{sum(COUNTED_EXCLUSION_COMPONENTS.values())}` pool is the current counted/package seed pool; this audit also checks failed/candidate/intermediate artifacts to avoid hidden seed reuse before API execution.",
         ]
     )
     write_text(EXCLUSION_AUDIT_MD_PATH, "\n".join(lines) + "\n")
@@ -632,7 +685,7 @@ def write_run_manifest(
         "preflight_result": {
             "passed": True,
             "api_execution_allowed_by_this_run": False,
-            "next_stop_line": "reviewer_signoff_then_candidate_28_api_execution",
+            "next_stop_line": f"reviewer_signoff_then_candidate_{EXPECTED_CANDIDATE_SEED_COUNT}_api_execution",
             "interim_seed_registry_overlap_count": exclusion_audit_summary["interim_seed_registry_overlap_count"],
             "processed_split_overlap_count": exclusion_audit_summary["processed_train_dev_test_overlap_count"],
             "audit_queue_overlap_count": exclusion_audit_summary["processed_audit_queue_overlap_count"],
@@ -640,8 +693,8 @@ def write_run_manifest(
             "source_field_contract_pass_count": source_contract_summary["source_field_contract_pass_count"],
         },
         "future_api_pilot_contract": {
-            "candidate_generation": 28,
-            "final_package": 16,
+            "candidate_generation": EXPECTED_CANDIDATE_SEED_COUNT,
+            "final_package": FINAL_PACKAGE_TARGET_COUNT,
             "accepted_final_gate": "hard_soft_audit_0_validator_accept_export_ready_metadata_shuffle_0",
             "count_reflection": "not_counted_until_reviewer_signoff",
             "required_breakout": [
@@ -678,6 +731,7 @@ def write_run_manifest(
 
 
 def main() -> None:
+    refresh_paths()
     seed_rows = build_seed_registry()
     exclusion_audit_summary = write_exclusion_audit(seed_rows)
     source_contract_summary = write_source_field_contract(seed_rows)

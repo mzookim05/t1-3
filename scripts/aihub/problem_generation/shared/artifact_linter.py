@@ -572,6 +572,7 @@ def lint_pool_tail_split(findings: list[Finding], fixture_id: str, paths: dict[s
         "not_selected_reason",
         "future_candidate_reusable",
         "candidate_reuse_policy",
+        "promotion_contract_status",
     }
     for field in sorted(required_rejected_fields - set(rejected_fields)):
         add_finding(findings, fixture_id, "P2", "pool_tail_split", rejected_path, f"rejected_pool is missing {field}")
@@ -642,6 +643,7 @@ def lint_pool_tail_split(findings: list[Finding], fixture_id: str, paths: dict[s
         "not_selected_reason": "label_quota_filled",
         "future_candidate_reusable": YES,
         "candidate_reuse_policy": "reuse_allowed_as_surplus_candidate",
+        "promotion_contract_status": "not_promoted_quota_surplus",
     }
     for row in quota_rows:
         for field, expected_value in quota_expected.items():
@@ -653,6 +655,42 @@ def lint_pool_tail_split(findings: list[Finding], fixture_id: str, paths: dict[s
                     "pool_tail_split",
                     quota_path,
                     f"quota_surplus_pool {field} expected {expected_value!r}, got {row.get(field, '')!r}",
+                )
+
+
+def lint_candidate_pool_neutral_status(findings: list[Finding], fixture_id: str, paths: dict[str, Any]) -> None:
+    # raw candidate pool은 final package가 아니므로, 품질 실패처럼 보이는 상태값이 남으면 재사용 정책을 오해할 수 있다.
+    candidate_pool_path = resolve_repo_path(paths.get("candidate_pool_csv"))
+    if not lint_existing_path(findings, fixture_id, candidate_pool_path, "missing_candidate_pool_csv"):
+        return
+    assert candidate_pool_path is not None
+    rows, fields = read_csv_rows(candidate_pool_path)
+    required_fields = {
+        "pool_class",
+        "quality_failure",
+        "promotion_contract_status",
+        "count_reflection_status",
+        "count_allowed",
+    }
+    for field in sorted(required_fields - set(fields)):
+        add_finding(findings, fixture_id, "P2", "candidate_pool_neutral_status", candidate_pool_path, f"candidate_pool is missing {field}")
+    expected_values = {
+        "pool_class": "candidate_pool",
+        "quality_failure": "대상아님",
+        "promotion_contract_status": "candidate_pool_not_promoted",
+        "count_reflection_status": "not_counted_until_reviewer_signoff",
+        "count_allowed": NO,
+    }
+    for row in rows:
+        for field, expected_value in expected_values.items():
+            if row.get(field, "") != expected_value:
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "candidate_pool_neutral_status",
+                    candidate_pool_path,
+                    f"candidate_pool {field} expected {expected_value!r}, got {row.get(field, '')!r}",
                 )
 
 
@@ -773,14 +811,23 @@ def lint_markdown_candidate(findings: list[Finding], fixture_id: str, path: Path
         )
 
 
-def lint_validator_wiring_check_md(findings: list[Finding], fixture_id: str, path: Path | None) -> None:
+def lint_validator_wiring_check_md(
+    findings: list[Finding],
+    fixture_id: str,
+    path: Path | None,
+    expectations: dict[str, Any] | None = None,
+) -> None:
     if not lint_existing_path(findings, fixture_id, path, "missing_validator_wiring_check_md"):
         return
     assert path is not None
     text = path.read_text(encoding="utf-8")
     # Overgeneration run은 candidate seed 수와 final package 수가 다르므로,
-    # wiring artifact에서 두 숫자가 섞이면 source-preflight provenance가 깨진다.
-    stale_phrases = ["no-API preflight 16개", "`A/B/C/D = 4/4/4/4` target 적용"]
+    # fixture별 기대 문구를 받아 다음 package factory 비율에서도 같은 검산기를 재사용한다.
+    expectations = expectations or {}
+    stale_phrases = expectations.get(
+        "stale_phrases",
+        ["no-API preflight 16개", "`A/B/C/D = 4/4/4/4` target 적용"],
+    )
     hits = [phrase for phrase in stale_phrases if phrase in text]
     if hits:
         add_finding(
@@ -791,11 +838,14 @@ def lint_validator_wiring_check_md(findings: list[Finding], fixture_id: str, pat
             path,
             f"validator_wiring_check_md contains stale scope phrase(s): {hits}",
         )
-    required_phrases = [
-        "no-API preflight 28개와 같은 seed registry 사용",
-        "candidate target `A/B/C/D = 7/7/7/7`",
-        "final export `A/B/C/D = 4/4/4/4`",
-    ]
+    required_phrases = expectations.get(
+        "required_phrases",
+        [
+            "no-API preflight 28개와 같은 seed registry 사용",
+            "candidate target `A/B/C/D = 7/7/7/7`",
+            "final export `A/B/C/D = 4/4/4/4`",
+        ],
+    )
     missing = [phrase for phrase in required_phrases if phrase not in text]
     if missing:
         add_finding(
@@ -841,6 +891,19 @@ def lint_counted_final_package(fixture: dict[str, Any]) -> list[Finding]:
         path = resolve_repo_path(paths.get(key))
         if path is not None:
             lint_markdown_counted(findings, fixture_id, path, artifact_name)
+    # counted package도 validator wiring markdown이 있으면 함께 본다.
+    # count 반영 뒤 pre-signoff 문구가 남으면 다음 seed/API 계획에서 상태를 오해할 수 있다.
+    if paths.get("validator_wiring_check_md") is not None:
+        lint_validator_wiring_check_md(
+            findings,
+            fixture_id,
+            resolve_repo_path(paths.get("validator_wiring_check_md")),
+            fixture.get("validator_wiring_expectations"),
+        )
+    if any(paths.get(key) is not None for key in ["rejected_pool_csv", "tail_taxonomy_csv", "quota_surplus_csv"]):
+        lint_pool_tail_split(findings, fixture_id, paths)
+    if paths.get("candidate_pool_csv") is not None:
+        lint_candidate_pool_neutral_status(findings, fixture_id, paths)
     return findings
 
 
@@ -877,8 +940,15 @@ def lint_count_reflection_candidate_package(fixture: dict[str, Any]) -> list[Fin
         path = resolve_repo_path(paths.get(key))
         if path is not None:
             lint_markdown_candidate(findings, fixture_id, path, artifact_name)
-    lint_validator_wiring_check_md(findings, fixture_id, resolve_repo_path(paths.get("validator_wiring_check_md")))
+    lint_validator_wiring_check_md(
+        findings,
+        fixture_id,
+        resolve_repo_path(paths.get("validator_wiring_check_md")),
+        fixture.get("validator_wiring_expectations"),
+    )
     lint_pool_tail_split(findings, fixture_id, paths)
+    if paths.get("candidate_pool_csv") is not None:
+        lint_candidate_pool_neutral_status(findings, fixture_id, paths)
     return findings
 
 
@@ -1023,6 +1093,7 @@ def render_markdown_report(
     output_dir: Path,
     findings_by_fixture: dict[str, list[Finding]],
     outcomes_by_fixture: dict[str, FixtureOutcome],
+    fixtures: list[dict[str, Any]],
 ) -> str:
     total = len(outcomes_by_fixture)
     passed = sum(1 for outcome in outcomes_by_fixture.values() if outcome.fixture_passed)
@@ -1053,6 +1124,22 @@ def render_markdown_report(
             f"`{outcome.unexpected_blocking_count}` | `{YES if outcome.expected_only_pass else NO}` | "
             f"`{str(outcome.fixture_passed).lower()}` | `{blocking}` | `{p3}` | `{info}` |"
         )
+
+    lines.extend(
+        [
+            "",
+            "## coverage summary",
+            "",
+            "| fixture | covered path keys |",
+            "| --- | --- |",
+        ]
+    )
+    for fixture in fixtures:
+        fixture_id = fixture.get("fixture_id", "unknown")
+        # Reviewer handoff에서 linter가 어떤 artifact surface를 실제로 본 것인지 드러낸다.
+        # 특히 validator_wiring_check_md처럼 finding이 없으면 report에서 사라지는 파일의 coverage를 보존한다.
+        path_keys = sorted((fixture.get("paths") or {}).keys())
+        lines.append(f"| `{fixture_id}` | `{', '.join(path_keys)}` |")
 
     lines.extend(
         [
@@ -1131,6 +1218,7 @@ def run_linter(manifest_path: Path, output_dir: Path) -> bool:
             "unexpected_blocking_count": outcome.unexpected_blocking_count,
             "expected_only_pass": outcome.expected_only_pass,
             "passed": outcome.fixture_passed,
+            "covered_path_keys": sorted((next((f.get("paths") for f in fixtures if f.get("fixture_id") == fixture_id), {}) or {}).keys()),
         }
         for fixture_id, outcome in outcomes_by_fixture.items()
     }
@@ -1154,7 +1242,7 @@ def run_linter(manifest_path: Path, output_dir: Path) -> bool:
     )
     write_text_atomic(
         output_dir / "artifact_linter_report.md",
-        render_markdown_report(manifest_path, output_dir, findings_by_fixture, outcomes_by_fixture),
+        render_markdown_report(manifest_path, output_dir, findings_by_fixture, outcomes_by_fixture, fixtures),
     )
     return all(outcome.fixture_passed for outcome in outcomes_by_fixture.values())
 
