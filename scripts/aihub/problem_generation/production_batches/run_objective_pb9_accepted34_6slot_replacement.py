@@ -30,11 +30,8 @@ RUN_PURPOSE = "objective_r2_pb9_tail_6slot_salvage_package"
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
 
 PROJECT_ROOT = pb8.pb6.pb4.pb3.base.PROJECT_ROOT
-SOURCE_PB9_RUN_NAME = "2026-04-26_031559_pb9_decision_only_controlled_production_with_choice_validator_objective_r2_decision_only_api_execution"
-SOURCE_PB9_RUN_DIR = PROJECT_ROOT / "analysis" / "aihub" / "problem_generation" / "llm_runs" / SOURCE_PB9_RUN_NAME
-SOURCE_PB9_MERGED_PATH = (
-    SOURCE_PB9_RUN_DIR / "merged" / "merged_problem_scores_pb9_decision_only_controlled_production_with_choice_validator.csv"
-)
+SOURCE_PB9_VERSION_TAG = "pb9_decision_only_controlled_production_with_choice_validator"
+SOURCE_PB9_RUN_PURPOSE = "objective_r2_decision_only_api_execution"
 SOURCE_PB9_SEED_REGISTRY_PATH = (
     PROJECT_ROOT
     / "data"
@@ -42,8 +39,49 @@ SOURCE_PB9_SEED_REGISTRY_PATH = (
     / "aihub"
     / "problem_generation"
     / "production_batches"
-    / "pb9_decision_only_controlled_production_with_choice_validator"
+    / SOURCE_PB9_VERSION_TAG
     / "seed_registry.csv"
+)
+
+
+def read_seed_registry_keys(path: Path) -> list[tuple[str, str, str, str, str, str]]:
+    # source pb9 run 이름 앞부분은 실제 실행 시각이므로, 날짜를 고정하지 않고 seed registry로 provenance를 찾는다.
+    with path.open(newline="", encoding="utf-8-sig") as input_file:
+        rows = list(csv.DictReader(input_file))
+    return [
+        (
+            row.get("seed_sample_id", ""),
+            row.get("reference_sample_id", ""),
+            row.get("family_id", ""),
+            row.get("label_path", ""),
+            row.get("raw_path", ""),
+            row.get("target_correct_choice", ""),
+        )
+        for row in rows
+    ]
+
+
+def resolve_source_pb9_run_dir() -> Path:
+    # 같은 목적의 실행이 여러 개 있어도 locked seed registry가 같은 최신 API run만 source로 채택한다.
+    llm_runs_root = PROJECT_ROOT / "analysis" / "aihub" / "problem_generation" / "llm_runs"
+    pattern = f"*_{SOURCE_PB9_VERSION_TAG}_{SOURCE_PB9_RUN_PURPOSE}"
+    source_registry_keys = read_seed_registry_keys(SOURCE_PB9_SEED_REGISTRY_PATH)
+    matched_dirs: list[Path] = []
+    for candidate_dir in sorted(llm_runs_root.glob(pattern)):
+        candidate_registry = candidate_dir / "inputs" / "seed_registry.csv"
+        if not candidate_registry.exists():
+            continue
+        if read_seed_registry_keys(candidate_registry) == source_registry_keys:
+            matched_dirs.append(candidate_dir)
+    if not matched_dirs:
+        raise FileNotFoundError(f"source pb9 run not found for {SOURCE_PB9_SEED_REGISTRY_PATH}")
+    return matched_dirs[-1]
+
+
+SOURCE_PB9_RUN_DIR = resolve_source_pb9_run_dir()
+SOURCE_PB9_RUN_NAME = SOURCE_PB9_RUN_DIR.name
+SOURCE_PB9_MERGED_PATH = (
+    SOURCE_PB9_RUN_DIR / "merged" / f"merged_problem_scores_{SOURCE_PB9_VERSION_TAG}.csv"
 )
 REFERENCE_04TL_CALIBRATION_SEED_REGISTRY_PATH = (
     PROJECT_ROOT
@@ -889,6 +927,9 @@ def rewrite_split_jsonl_with_status(package: list[dict[str, str]]) -> None:
                     "validator_export_disposition": source.get("validator_export_disposition", ""),
                     "target_correct_choice": source.get("target_correct_choice", ""),
                     "export_correct_choice": source.get("export_correct_choice", ""),
+                    # split JSONL만 직접 소비하는 downstream도 manifest와 같은 remap 검산 신호를 볼 수 있어야 한다.
+                    "validator_recalculated_correct_choice": source.get("validator_recalculated_correct_choice", ""),
+                    "metadata_remap_ok": source.get("metadata_remap_ok", ""),
                 }
             )
             enriched_rows.append(enriched)
