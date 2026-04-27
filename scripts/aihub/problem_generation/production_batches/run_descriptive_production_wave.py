@@ -299,6 +299,43 @@ def scaled_source_counts(base_counts: dict[str, int], target_total: int) -> dict
     return floors
 
 
+def final_split_counts(final_target_count: int) -> tuple[int, int, int]:
+    # emergency wave는 final 80/64처럼 기존 40보다 커질 수 있으므로,
+    # reviewer가 지정한 train/dev/test 비율을 route target에서 직접 계산한다.
+    if final_target_count >= 80:
+        return final_target_count - 16, 8, 8
+    if final_target_count >= 64:
+        return final_target_count - 12, 6, 6
+    if final_target_count >= 40:
+        return final_target_count - 8, 4, 4
+    if final_target_count >= 20:
+        return final_target_count - 4, 2, 2
+    if final_target_count >= 10:
+        return final_target_count - 2, 1, 1
+    return final_target_count, 0, 0
+
+
+def route_with_split(route: dict) -> dict:
+    # route config에 split quota를 함께 저장해 preflight/manifest/evidence가 같은 기준을 보게 한다.
+    train_count, dev_count, test_count = final_split_counts(int(route["target_count"]))
+    route = {
+        **route,
+        "final_train_count": train_count,
+        "final_dev_count": dev_count,
+        "final_test_count": test_count,
+    }
+    if route.get("fallback_target_count"):
+        fallback_train, fallback_dev, fallback_test = final_split_counts(int(route["fallback_target_count"]))
+        route.update(
+            {
+                "fallback_final_train_count": fallback_train,
+                "fallback_final_dev_count": fallback_dev,
+                "fallback_final_test_count": fallback_test,
+            }
+        )
+    return route
+
+
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
@@ -356,6 +393,16 @@ def configure_base_paths() -> None:
         "Answerability": ANSWERABILITY_LOG_PATH,
         "TaskFit": TASKFIT_LOG_PATH,
     }
+    # 마감 대응 emergency route에서는 Judge 동시성을 환경변수로 올리되,
+    # 코드 기본값은 기존 안전값을 유지한다.
+    base.JUDGE_MAIN_MAX_WORKERS = int(os.environ.get("DESCRIPTIVE_WAVE_JUDGE_MAIN_MAX_WORKERS", base.JUDGE_MAIN_MAX_WORKERS))
+    base.JUDGE_MAIN_MAX_ATTEMPTS = int(os.environ.get("DESCRIPTIVE_WAVE_JUDGE_MAIN_MAX_ATTEMPTS", base.JUDGE_MAIN_MAX_ATTEMPTS))
+    base.JUDGE_MAIN_RETRY_BASE_SECONDS = int(
+        os.environ.get("DESCRIPTIVE_WAVE_JUDGE_MAIN_RETRY_BASE_SECONDS", base.JUDGE_MAIN_RETRY_BASE_SECONDS)
+    )
+    base.JUDGE_MAIN_CHECKPOINT_EVERY = int(
+        os.environ.get("DESCRIPTIVE_WAVE_JUDGE_MAIN_CHECKPOINT_EVERY", base.JUDGE_MAIN_CHECKPOINT_EVERY)
+    )
 
 
 def row_value(row: dict, field: str) -> str:
@@ -808,34 +855,73 @@ def write_availability_map(availability_rows: list[dict], route_rows: list[dict]
 
 def choose_route(exclusion_sets: dict[str, set[str]]) -> tuple[dict, list[dict], list[dict]]:
     routes = []
+    if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_EMERGENCY128") == "1":
+        # reviewer emergency stop line: 128 -> 96 -> 64 순서로 preflight 가능한 최대 route를 고른다.
+        routes.extend(
+            [
+                route_with_split(
+                    {
+                        "route_label": "emergency_source_relaxed_candidate128_final80",
+                        "target_count": 80,
+                        "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 128),
+                        "final_source_counts": scaled_source_counts(MEDIUM_RELAXED_FINAL_SOURCE_COUNTS, 80),
+                        "source_balance_relaxation": "emergency candidate128; scaled from medium source-relaxed schedule; 01_TL_법령_QA remains excluded",
+                    }
+                ),
+                route_with_split(
+                    {
+                        "route_label": "emergency_source_relaxed_candidate96_final64",
+                        "target_count": 64,
+                        "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 96),
+                        "final_source_counts": scaled_source_counts(MEDIUM_RELAXED_FINAL_SOURCE_COUNTS, 64),
+                        "source_balance_relaxation": "emergency fallback candidate96; scaled from medium source-relaxed schedule; 01_TL_법령_QA remains excluded",
+                    }
+                ),
+                route_with_split(
+                    {
+                        "route_label": "emergency_source_relaxed_candidate64_final40",
+                        "target_count": 40,
+                        "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64),
+                        "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                        "source_balance_relaxation": "emergency fallback candidate64; same law lane 02/03/04 absorbs depleted 01_TL_법령_QA quota",
+                    }
+                ),
+            ]
+        )
     if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_CANDIDATE64") == "1":
         candidate64_source_counts = scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64)
         routes.append(
-            {
-                "route_label": "medium_source_relaxed_candidate64_final40",
-                "target_count": 40,
-                "source_counts": candidate64_source_counts,
-                "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
-                "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs quota; candidate64 scaled from medium source-relaxed schedule",
-            }
+            route_with_split(
+                {
+                    "route_label": "medium_source_relaxed_candidate64_final40",
+                    "target_count": 40,
+                    "source_counts": candidate64_source_counts,
+                    "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                    "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs quota; candidate64 scaled from medium source-relaxed schedule",
+                }
+            )
         )
     routes.extend(
         [
-        {
-            "route_label": "medium_source_relaxed_candidate56_final40",
-            "target_count": 40,
-            "source_counts": MEDIUM_RELAXED_SOURCE_COUNTS,
-            "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
-            "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs +1/+1/+1",
-        },
-        {
-            "route_label": "constrained_candidate34_primary24_fallback20",
-            "target_count": 24,
-            "fallback_target_count": 20,
-            "source_counts": CONSTRAINED_SOURCE_COUNTS,
-            "final_source_counts": CONSTRAINED_PRIMARY_FINAL_SOURCE_COUNTS,
-            "fallback_final_source_counts": CONSTRAINED_FALLBACK_FINAL_SOURCE_COUNTS,
-        },
+            route_with_split(
+                {
+                    "route_label": "medium_source_relaxed_candidate56_final40",
+                    "target_count": 40,
+                    "source_counts": MEDIUM_RELAXED_SOURCE_COUNTS,
+                    "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                    "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs +1/+1/+1",
+                }
+            ),
+            route_with_split(
+                {
+                    "route_label": "constrained_candidate34_primary24_fallback20",
+                    "target_count": 24,
+                    "fallback_target_count": 20,
+                    "source_counts": CONSTRAINED_SOURCE_COUNTS,
+                    "final_source_counts": CONSTRAINED_PRIMARY_FINAL_SOURCE_COUNTS,
+                    "fallback_final_source_counts": CONSTRAINED_FALLBACK_FINAL_SOURCE_COUNTS,
+                }
+            ),
         ]
     )
     route_rows = []
@@ -936,6 +1022,7 @@ def write_preflight(seed_rows: list[dict], exclusion_sets: dict[str, set[str]], 
         f"- route_label: `{ACTIVE_ROUTE['route_label']}`",
         f"- candidate_count: `{len(seed_rows)}`",
         f"- final_target_count: `{ACTIVE_ROUTE['target_count']}`",
+        f"- final_split_target: `train {ACTIVE_ROUTE.get('final_train_count', '')} / dev {ACTIVE_ROUTE.get('final_dev_count', '')} / test {ACTIVE_ROUTE.get('final_test_count', '')}`",
         f"- fallback_final_target_count: `{ACTIVE_ROUTE.get('fallback_target_count', '')}`",
         f"- source_balance_relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
         f"- doc_type_counts: `{dict(doc_counts)}`",
@@ -1064,18 +1151,15 @@ def split_for_final_rows(final_rows: list[dict]) -> list[dict]:
         ),
     )
     total = len(ordered_rows)
-    if total >= 40:
-        dev_count = 4
-        test_count = 4
-    elif total >= 20:
-        dev_count = 2
-        test_count = 2
-    elif total >= 10:
-        dev_count = 1
-        test_count = 1
+    active_target = int(ACTIVE_ROUTE.get("active_final_target_count", ACTIVE_ROUTE.get("target_count", total)) or total)
+    if active_target == int(ACTIVE_ROUTE.get("fallback_target_count", 0) or 0):
+        dev_count = int(ACTIVE_ROUTE.get("fallback_final_dev_count", 0) or 0)
+        test_count = int(ACTIVE_ROUTE.get("fallback_final_test_count", 0) or 0)
     else:
-        dev_count = 0
-        test_count = 0
+        dev_count = int(ACTIVE_ROUTE.get("final_dev_count", 0) or 0)
+        test_count = int(ACTIVE_ROUTE.get("final_test_count", 0) or 0)
+    if not dev_count and not test_count:
+        _, dev_count, test_count = final_split_counts(total)
     train_count = max(total - dev_count - test_count, sum(1 for row in ordered_rows if is_tier2_train_locked(row)))
     with_splits: list[dict] = []
     for index, row in enumerate(ordered_rows):
@@ -1149,7 +1233,7 @@ def compile_final_package(merged_rows: list[dict]) -> dict[str, list[dict]]:
 
     final_rows, accepted_with_selection, quota_rejected = select_by_quota(dict(ACTIVE_ROUTE["final_source_counts"]))
     active_target = int(ACTIVE_ROUTE["target_count"])
-    active_final_route = "primary_final24" if ACTIVE_ROUTE["target_count"] == 24 else "primary_final"
+    active_final_route = f"primary_final{ACTIVE_ROUTE['target_count']}"
     if len(final_rows) < active_target and ACTIVE_ROUTE.get("fallback_final_source_counts"):
         fallback_rows, fallback_accepted, fallback_rejected = select_by_quota(dict(ACTIVE_ROUTE["fallback_final_source_counts"]))
         fallback_target = int(ACTIVE_ROUTE.get("fallback_target_count", 0))
@@ -1158,7 +1242,7 @@ def compile_final_package(merged_rows: list[dict]) -> dict[str, list[dict]]:
             accepted_with_selection = fallback_accepted
             quota_rejected = fallback_rejected
             active_target = fallback_target
-            active_final_route = "fallback_final20"
+            active_final_route = f"fallback_final{fallback_target}"
     ACTIVE_ROUTE["active_final_target_count"] = active_target
     ACTIVE_ROUTE["active_final_route_label"] = active_final_route
     rejected.extend(quota_rejected)

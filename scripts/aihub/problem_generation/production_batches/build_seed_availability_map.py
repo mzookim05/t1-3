@@ -224,6 +224,7 @@ def build_route_feasibility(available_by_source: dict[str, int]) -> list[dict[st
         ("target20_candidate34_constrained", wave.CONSTRAINED_SOURCE_COUNTS),
         ("target24_candidate40_scaled", scaled_source_counts(wave.MEDIUM_RELAXED_SOURCE_COUNTS, 40)),
         ("target40_candidate56_source_relaxed", wave.MEDIUM_RELAXED_SOURCE_COUNTS),
+        ("target80_candidate128_emergency_scaled", scaled_source_counts(wave.MEDIUM_RELAXED_SOURCE_COUNTS, 128)),
         ("target64_candidate96_scaled", scaled_source_counts(wave.MEDIUM_RELAXED_SOURCE_COUNTS, 96)),
     ]
     rows: list[dict[str, str]] = []

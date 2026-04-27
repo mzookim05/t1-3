@@ -137,6 +137,9 @@ DESCRIPTIVE_MEDIUM_SYNC_RUN = latest_llm_run_dir(
 DESCRIPTIVE_MEDIUM_REPEAT_RUN = latest_llm_run_dir(
     "descriptive_medium_repeat_availability_aware_descriptive_v3_medium_repeat_target40_candidate56_64_api_execution"
 )
+DESCRIPTIVE_EMERGENCY_154712_RUN = latest_llm_run_dir(
+    "descriptive_emergency_candidate128_final80_descriptive_v3_emergency_candidate128_final80_judge16_with_candidate96_64_fallback_api_execution"
+)
 
 
 @dataclass
@@ -675,6 +678,37 @@ def build_fixture_manifest(fixture_root: Path) -> list[dict[str, Any]]:
                 / "problem_generation"
                 / "production_batches"
                 / "descriptive_medium_repeat_availability_aware",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_emergency_candidate128_final80_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "candidate_count: `64`",
+                    "final_target_count: `40`",
+                ],
+                "required_phrases": [
+                    "candidate_count: `128`",
+                    "final_target_count: `80`",
+                    "final_split_target: `train 64 / dev 8 / test 8`",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_EMERGENCY_154712_RUN,
+                "descriptive_emergency_candidate128_final80",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_emergency_candidate128_final80",
             ),
         },
     ]
