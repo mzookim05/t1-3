@@ -299,6 +299,132 @@ def scaled_source_counts(base_counts: dict[str, int], target_total: int) -> dict
     return floors
 
 
+def move_source_quota(counts: dict[str, int], source_subset: str, destination_sources: list[str]) -> dict[str, int]:
+    # post-154712에서는 특정 depleted source를 계속 요구하면 preflight가 막히므로,
+    # 같은 doc_type 안의 살아 있는 source로 quota만 옮겨 leakage guard와 문서유형 총량을 함께 지킨다.
+    moved_count = counts.get(source_subset, 0)
+    counts[source_subset] = 0
+    if not destination_sources:
+        return counts
+    for index in range(moved_count):
+        counts[destination_sources[index % len(destination_sources)]] = counts.get(
+            destination_sources[index % len(destination_sources)],
+            0,
+        ) + 1
+    return counts
+
+
+def cap_source_quota(counts: dict[str, int], source_subset: str, cap: int, destination_sources: list[str]) -> dict[str, int]:
+    # source-local availability가 1건만 부족해도 대형 route 전체가 막히므로,
+    # depleted 직전 source는 cap을 걸고 같은 해석례 계열 source로 초과 quota를 옮긴다.
+    current_count = counts.get(source_subset, 0)
+    excess_count = max(0, current_count - cap)
+    counts[source_subset] = min(current_count, cap)
+    if not destination_sources:
+        return counts
+    for index in range(excess_count):
+        counts[destination_sources[index % len(destination_sources)]] = counts.get(
+            destination_sources[index % len(destination_sources)],
+            0,
+        ) + 1
+    return counts
+
+
+def source_reallocated_counts(base_counts: dict[str, int], target_total: int, *, cap_interpretation_04: bool) -> dict[str, int]:
+    # reviewer 회신의 P2를 route로 코드화한다:
+    # `02_TL_법령_QA`는 post-154712 기준 available 0이므로 요구하지 않고,
+    # `03/04_TL_법령_QA`가 같은 법령 doc_type 안에서 quota를 흡수한다.
+    counts = scaled_source_counts(base_counts, target_total)
+    counts = move_source_quota(counts, "02_TL_법령_QA", ["03_TL_법령_QA", "04_TL_법령_QA"])
+    if cap_interpretation_04 and target_total >= 128:
+        counts = cap_source_quota(counts, "04_TL_해석례_QA", 8, ["03_TL_해석례_QA", "01_TL_유권해석_QA"])
+    return counts
+
+
+def with_eval_targeting(route: dict) -> dict:
+    # source-reallocated repeat은 총량은 확보했지만 법령/결정례 eval 부족을 남겼다.
+    # 다음 route는 같은 source schedule 위에서 split assignment만 eval-targeted로 잠근다.
+    return {
+        **route,
+        "eval_targeting_contract": "법령_QA/결정례_QA dev-test 우선 배정, 해석례_QA eval 추가 최소화",
+        "eval_balanced_doc_types": ["법령_QA", "결정례_QA"],
+        "eval_priority_doc_types": ["법령_QA", "결정례_QA", "판결문_QA"],
+        "eval_avoid_doc_types": ["해석례_QA"],
+    }
+
+
+def with_deficit_closure(route: dict) -> dict:
+    # post-174728부터는 서술형 eval 부족이 2건뿐이라 기본 8개 eval split을 반복하면 과잉 eval이 생긴다.
+    # deficit-closure route는 strict final gate를 유지하되, split만 train-heavy로 고정해 aggregate shortage를 직접 닫는다.
+    target_count = int(route["target_count"])
+    split_overrides = {
+        40: (38, 1, 1),
+        24: (22, 1, 1),
+        12: (10, 1, 1),
+    }
+    train_count, dev_count, test_count = split_overrides.get(target_count, final_split_counts(target_count))
+    return {
+        **with_eval_targeting(route),
+        "final_train_count": train_count,
+        "final_dev_count": dev_count,
+        "final_test_count": test_count,
+        "deficit_closure_contract": "남은 서술형 shortage를 train-heavy split으로 직접 보강",
+        "eval_targeting_contract": "aggregate eval target closure 우선, dev/test는 법령_QA/결정례_QA 우선 배정",
+    }
+
+
+def with_train_micro_closure(route: dict) -> dict:
+    # `181810` 이후 서술형 eval은 이미 닫혔고 train만 5건 남았으므로,
+    # micro-closure route는 평가 split을 만들지 않고 train-only final package로 잠근다.
+    return {
+        **route,
+        "final_train_count": int(route["target_count"]),
+        "final_dev_count": 0,
+        "final_test_count": 0,
+        "deficit_closure_contract": "남은 서술형 train shortage 5건만 직접 보강",
+        "eval_targeting_contract": "eval target은 이미 닫혔으므로 dev/test 추가 생성 없음",
+    }
+
+
+def with_type_balance_extension(route: dict) -> dict:
+    # aggregate count는 이미 닫혔지만, 사용자가 유형별 균형까지 요구한 경우에는
+    # 법령/결정례/판결문 eval 부족과 해석례 train 부족을 한 번에 줄이는 reporting-balance route를 연다.
+    return {
+        **route,
+        "final_train_count": 18,
+        "final_dev_count": 11,
+        "final_test_count": 11,
+        "eval_targeting_contract": "descriptive type-balance extension: 법령_QA eval 9, 결정례_QA eval 10, 판결문_QA eval 1 우선 배정 뒤 남은 eval 2건은 weighted fallback으로 배정",
+        "eval_target_doc_counts": {
+            "법령_QA": 9,
+            # 일부 결정례 accepted row는 Tier 2 train-lock이라 eval로 보낼 수 없어, strict target을 available 10건으로 낮춘다.
+            "결정례_QA": 10,
+            "판결문_QA": 1,
+        },
+        "eval_priority_doc_types": ["결정례_QA", "법령_QA", "판결문_QA", "해석례_QA"],
+        "eval_avoid_doc_types": ["해석례_QA"],
+        "deficit_closure_contract": "aggregate 초과를 감수하되 유형별 train/eval imbalance를 줄이는 reporting-balance extension",
+    }
+
+
+def with_type_deficit_overclosure(route: dict, *, train_count: int, dev_count: int, test_count: int) -> dict:
+    # reviewer가 요구한 type-deficit overclosure는 aggregate target이 이미 닫힌 뒤에도
+    # 해석례 train과 결정례 eval 균형을 함께 보강하는 final-only strict package로 분리한다.
+    return {
+        **route,
+        "final_train_count": train_count,
+        "final_dev_count": dev_count,
+        "final_test_count": test_count,
+        "eval_targeting_contract": "descriptive type-deficit overclosure: 해석례_QA train add-on과 결정례_QA dev/test add-on을 한 package로 조립",
+        "eval_target_doc_counts": {
+            "결정례_QA": dev_count + test_count,
+        },
+        "eval_priority_doc_types": ["결정례_QA"],
+        "eval_avoid_doc_types": ["해석례_QA"],
+        "deficit_closure_contract": "aggregate 초과를 감수하되 유형별 reporting shortage를 줄이는 type-deficit overclosure route",
+    }
+
+
 def final_split_counts(final_target_count: int) -> tuple[int, int, int]:
     # emergency wave는 final 80/64처럼 기존 40보다 커질 수 있으므로,
     # reviewer가 지정한 train/dev/test 비율을 route target에서 직접 계산한다.
@@ -395,6 +521,16 @@ def configure_base_paths() -> None:
     }
     # 마감 대응 emergency route에서는 Judge 동시성을 환경변수로 올리되,
     # 코드 기본값은 기존 안전값을 유지한다.
+    # generation도 같은 방식으로 열어 두어 `candidate128`급 repeat의 wall time 병목을 줄인다.
+    base.GENERATOR_MAIN_MAX_WORKERS = int(
+        os.environ.get("DESCRIPTIVE_WAVE_GENERATION_MAIN_MAX_WORKERS", base.GENERATOR_MAIN_MAX_WORKERS)
+    )
+    base.GENERATOR_STRICT_MAX_WORKERS = int(
+        os.environ.get("DESCRIPTIVE_WAVE_GENERATION_STRICT_MAX_WORKERS", base.GENERATOR_STRICT_MAX_WORKERS)
+    )
+    base.GENERATOR_MAIN_CHECKPOINT_EVERY = int(
+        os.environ.get("DESCRIPTIVE_WAVE_GENERATION_MAIN_CHECKPOINT_EVERY", base.GENERATOR_MAIN_CHECKPOINT_EVERY)
+    )
     base.JUDGE_MAIN_MAX_WORKERS = int(os.environ.get("DESCRIPTIVE_WAVE_JUDGE_MAIN_MAX_WORKERS", base.JUDGE_MAIN_MAX_WORKERS))
     base.JUDGE_MAIN_MAX_ATTEMPTS = int(os.environ.get("DESCRIPTIVE_WAVE_JUDGE_MAIN_MAX_ATTEMPTS", base.JUDGE_MAIN_MAX_ATTEMPTS))
     base.JUDGE_MAIN_RETRY_BASE_SECONDS = int(
@@ -855,75 +991,327 @@ def write_availability_map(availability_rows: list[dict], route_rows: list[dict]
 
 def choose_route(exclusion_sets: dict[str, set[str]]) -> tuple[dict, list[dict], list[dict]]:
     routes = []
-    if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_EMERGENCY128") == "1":
-        # reviewer emergency stop line: 128 -> 96 -> 64 순서로 preflight 가능한 최대 route를 고른다.
+    deficit_closure_mode = os.environ.get("DESCRIPTIVE_WAVE_ENABLE_DEFICIT_CLOSURE") == "1"
+    train_micro_closure_mode = os.environ.get("DESCRIPTIVE_WAVE_ENABLE_TRAIN_MICRO_CLOSURE") == "1"
+    type_deficit_overclosure_mode = os.environ.get("DESCRIPTIVE_WAVE_ENABLE_TYPE_DEFICIT_OVERCLOSURE") == "1"
+    type_balance_extension_mode = os.environ.get("DESCRIPTIVE_WAVE_ENABLE_TYPE_BALANCE_EXTENSION") == "1"
+    source_reallocated_mode = (
+        os.environ.get("DESCRIPTIVE_WAVE_ENABLE_SOURCE_REALLOCATED") == "1"
+        or os.environ.get("DESCRIPTIVE_WAVE_ENABLE_SOURCE_REALLOCATED_EVAL_TARGETED") == "1"
+    )
+    eval_targeted_mode = os.environ.get("DESCRIPTIVE_WAVE_ENABLE_SOURCE_REALLOCATED_EVAL_TARGETED") == "1"
+    if train_micro_closure_mode:
+        # reviewer가 "시간이 남으면 서술형 train 5건도 닫으라"고 언급했으므로,
+        # 과잉 final package를 만들지 않고 판결문_QA train 부족 5건만 정확히 보강한다.
+        routes.append(
+            with_train_micro_closure(
+                {
+                    "route_label": "train_micro_closure_judgment_candidate16_final5",
+                    "target_count": 5,
+                    "source_counts": {
+                        "01_TL_판결문_QA": 4,
+                        "02_TL_판결문_QA": 4,
+                        "03_TL_판결문_QA": 4,
+                        "04_TL_판결문_QA": 4,
+                    },
+                    "final_source_counts": {
+                        "01_TL_판결문_QA": 1,
+                        "02_TL_판결문_QA": 1,
+                        "03_TL_판결문_QA": 1,
+                        "04_TL_판결문_QA": 2,
+                    },
+                    "source_balance_relaxation": "post-181810 descriptive train micro-closure; 판결문_QA train shortage 5건 보강",
+                }
+            )
+        )
+    elif type_deficit_overclosure_mode:
+        # objective와 함께 유형별 균형을 닫는 reviewer stop line용 route다.
+        # primary 48/24가 source availability로 막히면 32/16 fallback을 같은 runner에서 자동 시도한다.
         routes.extend(
             [
-                route_with_split(
+                with_type_deficit_overclosure(
                     {
-                        "route_label": "emergency_source_relaxed_candidate128_final80",
-                        "target_count": 80,
-                        "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 128),
-                        "final_source_counts": scaled_source_counts(MEDIUM_RELAXED_FINAL_SOURCE_COUNTS, 80),
-                        "source_balance_relaxation": "emergency candidate128; scaled from medium source-relaxed schedule; 01_TL_법령_QA remains excluded",
-                    }
+                        "route_label": "type_deficit_overclosure_candidate48_final24",
+                        "target_count": 24,
+                        "source_counts": {
+                            "01_TL_유권해석_QA": 16,
+                            "03_TL_해석례_QA": 16,
+                            "03_TL_결정례_QA": 8,
+                            "04_TL_결정례_QA": 8,
+                        },
+                        "final_source_counts": {
+                            "01_TL_유권해석_QA": 8,
+                            "03_TL_해석례_QA": 8,
+                            "03_TL_결정례_QA": 4,
+                            "04_TL_결정례_QA": 4,
+                        },
+                        "source_balance_relaxation": "type-deficit overclosure primary; 해석례 train 16 + 결정례 eval 8 final package",
+                    },
+                    train_count=16,
+                    dev_count=4,
+                    test_count=4,
                 ),
-                route_with_split(
+                with_type_deficit_overclosure(
                     {
-                        "route_label": "emergency_source_relaxed_candidate96_final64",
-                        "target_count": 64,
-                        "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 96),
-                        "final_source_counts": scaled_source_counts(MEDIUM_RELAXED_FINAL_SOURCE_COUNTS, 64),
-                        "source_balance_relaxation": "emergency fallback candidate96; scaled from medium source-relaxed schedule; 01_TL_법령_QA remains excluded",
-                    }
+                        "route_label": "type_deficit_overclosure_candidate32_final16",
+                        "target_count": 16,
+                        "source_counts": {
+                            "01_TL_유권해석_QA": 12,
+                            "03_TL_해석례_QA": 12,
+                            "03_TL_결정례_QA": 4,
+                            "04_TL_결정례_QA": 4,
+                        },
+                        "final_source_counts": {
+                            "01_TL_유권해석_QA": 6,
+                            "03_TL_해석례_QA": 6,
+                            "03_TL_결정례_QA": 2,
+                            "04_TL_결정례_QA": 2,
+                        },
+                        "source_balance_relaxation": "type-deficit overclosure fallback; 해석례 train 12 + 결정례 eval 4 final package",
+                    },
+                    train_count=12,
+                    dev_count=2,
+                    test_count=2,
                 ),
-                route_with_split(
+            ]
+        )
+    elif type_balance_extension_mode:
+        # KCC 제출 전 유형별 균형을 같이 맞추기 위한 별도 extension route다.
+        # aggregate target은 이미 닫혔으므로 final package는 countable extension이지만, 보고에서는 balance add-on으로 분리한다.
+        routes.append(
+            with_type_balance_extension(
+                {
+                    "route_label": "type_balance_extension_candidate64_final40",
+                    "target_count": 40,
+                    "source_counts": {
+                        "03_TL_법령_QA": 8,
+                        "04_TL_법령_QA": 8,
+                        "01_TL_유권해석_QA": 8,
+                        "03_TL_해석례_QA": 8,
+                        "01_TL_심결례_QA": 5,
+                        "02_TL_심결례_QA": 3,
+                        "02_TL_심결문_QA": 3,
+                        "03_TL_결정례_QA": 4,
+                        "04_TL_결정례_QA": 5,
+                        "01_TL_판결문_QA": 3,
+                        "02_TL_판결문_QA": 3,
+                        "03_TL_판결문_QA": 3,
+                        "04_TL_판결문_QA": 3,
+                    },
+                    "final_source_counts": {
+                        "03_TL_법령_QA": 4,
+                        "04_TL_법령_QA": 5,
+                        "01_TL_유권해석_QA": 5,
+                        "03_TL_해석례_QA": 5,
+                        "01_TL_심결례_QA": 3,
+                        "02_TL_심결례_QA": 2,
+                        "02_TL_심결문_QA": 1,
+                        "03_TL_결정례_QA": 3,
+                        "04_TL_결정례_QA": 3,
+                        "01_TL_판결문_QA": 2,
+                        "02_TL_판결문_QA": 2,
+                        "03_TL_판결문_QA": 2,
+                        "04_TL_판결문_QA": 3,
+                    },
+                    "source_balance_relaxation": "descriptive aggregate target is closed; source/doc quotas intentionally reallocated for type balance reporting",
+                }
+            )
+        )
+    elif deficit_closure_mode:
+        # reviewer 회신의 다음 API-first stop line: 이미 eval target은 2건만 남았으므로,
+        # 같은 source-reallocated contract를 쓰되 final split을 train-heavy add-on으로 축소한다.
+        routes.extend(
+            [
+                with_deficit_closure(
                     {
-                        "route_label": "emergency_source_relaxed_candidate64_final40",
+                        "route_label": "deficit_closure_train_heavy_candidate64_final40",
                         "target_count": 40,
-                        "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64),
-                        "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
-                        "source_balance_relaxation": "emergency fallback candidate64; same law lane 02/03/04 absorbs depleted 01_TL_법령_QA quota",
+                        "source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_SOURCE_COUNTS,
+                            64,
+                            cap_interpretation_04=True,
+                        ),
+                        "final_source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            40,
+                            cap_interpretation_04=False,
+                        ),
+                        "source_balance_relaxation": "post-174728 deficit closure; 02_TL_법령_QA=0; law quota moved to 03/04_TL_법령_QA; train-heavy split 38/1/1",
+                    }
+                ),
+                with_deficit_closure(
+                    {
+                        "route_label": "deficit_closure_train_heavy_candidate40_final24",
+                        "target_count": 24,
+                        "source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_SOURCE_COUNTS,
+                            40,
+                            cap_interpretation_04=False,
+                        ),
+                        "final_source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            24,
+                            cap_interpretation_04=False,
+                        ),
+                        "source_balance_relaxation": "post-174728 deficit closure fallback; 02_TL_법령_QA=0; law quota moved to 03/04_TL_법령_QA; train-heavy split 22/1/1",
+                    }
+                ),
+                with_deficit_closure(
+                    {
+                        "route_label": "deficit_closure_train_heavy_candidate24_final12",
+                        "target_count": 12,
+                        "source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_SOURCE_COUNTS,
+                            24,
+                            cap_interpretation_04=False,
+                        ),
+                        "final_source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            12,
+                            cap_interpretation_04=False,
+                        ),
+                        "source_balance_relaxation": "post-174728 deficit closure final fallback; 02_TL_법령_QA=0; law quota moved to 03/04_TL_법령_QA; train-heavy split 10/1/1",
                     }
                 ),
             ]
         )
-    if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_CANDIDATE64") == "1":
-        candidate64_source_counts = scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64)
-        routes.append(
-            route_with_split(
-                {
-                    "route_label": "medium_source_relaxed_candidate64_final40",
-                    "target_count": 40,
-                    "source_counts": candidate64_source_counts,
-                    "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
-                    "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs quota; candidate64 scaled from medium source-relaxed schedule",
-                }
-            )
+    elif source_reallocated_mode:
+        # post-154712 API-first route: 기존 emergency schedule을 반복하지 않고,
+        # depleted `02_TL_법령_QA` quota를 같은 법령 source로 재배정한 route만 시도한다.
+        route_prefix = "source_reallocated_eval_targeted" if eval_targeted_mode else "source_reallocated"
+        source_balance_prefix = (
+            "post-171359 eval-targeted source reallocation"
+            if eval_targeted_mode
+            else "post-154712 source reallocation"
         )
-    routes.extend(
-        [
-            route_with_split(
-                {
-                    "route_label": "medium_source_relaxed_candidate56_final40",
-                    "target_count": 40,
-                    "source_counts": MEDIUM_RELAXED_SOURCE_COUNTS,
-                    "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
-                    "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs +1/+1/+1",
-                }
-            ),
-            route_with_split(
-                {
-                    "route_label": "constrained_candidate34_primary24_fallback20",
-                    "target_count": 24,
-                    "fallback_target_count": 20,
-                    "source_counts": CONSTRAINED_SOURCE_COUNTS,
-                    "final_source_counts": CONSTRAINED_PRIMARY_FINAL_SOURCE_COUNTS,
-                    "fallback_final_source_counts": CONSTRAINED_FALLBACK_FINAL_SOURCE_COUNTS,
-                }
-            ),
-        ]
-    )
+        route_wrapper = with_eval_targeting if eval_targeted_mode else (lambda route: route)
+        routes.extend(
+            [
+                route_wrapper(route_with_split(
+                    {
+                        "route_label": f"{route_prefix}_candidate128_final80",
+                        "target_count": 80,
+                        "source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_SOURCE_COUNTS,
+                            128,
+                            cap_interpretation_04=True,
+                        ),
+                        "final_source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            80,
+                            cap_interpretation_04=False,
+                        ),
+                        "source_balance_relaxation": f"{source_balance_prefix}; 02_TL_법령_QA=0; law quota moved to 03/04_TL_법령_QA; 04_TL_해석례_QA capped for candidate128",
+                    }
+                )),
+                route_wrapper(route_with_split(
+                    {
+                        "route_label": f"{route_prefix}_candidate96_final64",
+                        "target_count": 64,
+                        "source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_SOURCE_COUNTS,
+                            96,
+                            cap_interpretation_04=True,
+                        ),
+                        "final_source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            64,
+                            cap_interpretation_04=False,
+                        ),
+                        "source_balance_relaxation": f"{source_balance_prefix} fallback; 02_TL_법령_QA=0; law quota moved to 03/04_TL_법령_QA",
+                    }
+                )),
+                route_wrapper(route_with_split(
+                    {
+                        "route_label": f"{route_prefix}_candidate64_final40",
+                        "target_count": 40,
+                        "source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_SOURCE_COUNTS,
+                            64,
+                            cap_interpretation_04=True,
+                        ),
+                        "final_source_counts": source_reallocated_counts(
+                            MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            40,
+                            cap_interpretation_04=False,
+                        ),
+                        "source_balance_relaxation": f"{source_balance_prefix} final fallback; 02_TL_법령_QA=0; law quota moved to 03/04_TL_법령_QA",
+                    }
+                )),
+            ]
+        )
+    else:
+        # legacy schedule은 post-154712 기준 P2 blocker로 판정됐으므로,
+        # 명시적 source-reallocated mode가 아닐 때만 이전 route compatibility를 유지한다.
+        if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_EMERGENCY128") == "1":
+            # reviewer emergency stop line: 128 -> 96 -> 64 순서로 preflight 가능한 최대 route를 고른다.
+            routes.extend(
+                [
+                    route_with_split(
+                        {
+                            "route_label": "emergency_source_relaxed_candidate128_final80",
+                            "target_count": 80,
+                            "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 128),
+                            "final_source_counts": scaled_source_counts(MEDIUM_RELAXED_FINAL_SOURCE_COUNTS, 80),
+                            "source_balance_relaxation": "emergency candidate128; scaled from medium source-relaxed schedule; 01_TL_법령_QA remains excluded",
+                        }
+                    ),
+                    route_with_split(
+                        {
+                            "route_label": "emergency_source_relaxed_candidate96_final64",
+                            "target_count": 64,
+                            "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 96),
+                            "final_source_counts": scaled_source_counts(MEDIUM_RELAXED_FINAL_SOURCE_COUNTS, 64),
+                            "source_balance_relaxation": "emergency fallback candidate96; scaled from medium source-relaxed schedule; 01_TL_법령_QA remains excluded",
+                        }
+                    ),
+                    route_with_split(
+                        {
+                            "route_label": "emergency_source_relaxed_candidate64_final40",
+                            "target_count": 40,
+                            "source_counts": scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64),
+                            "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                            "source_balance_relaxation": "emergency fallback candidate64; same law lane 02/03/04 absorbs depleted 01_TL_법령_QA quota",
+                        }
+                    ),
+                ]
+            )
+        if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_CANDIDATE64") == "1":
+            candidate64_source_counts = scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64)
+            routes.append(
+                route_with_split(
+                    {
+                        "route_label": "medium_source_relaxed_candidate64_final40",
+                        "target_count": 40,
+                        "source_counts": candidate64_source_counts,
+                        "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                        "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs quota; candidate64 scaled from medium source-relaxed schedule",
+                    }
+                )
+            )
+        routes.extend(
+            [
+                route_with_split(
+                    {
+                        "route_label": "medium_source_relaxed_candidate56_final40",
+                        "target_count": 40,
+                        "source_counts": MEDIUM_RELAXED_SOURCE_COUNTS,
+                        "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                        "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs +1/+1/+1",
+                    }
+                ),
+                route_with_split(
+                    {
+                        "route_label": "constrained_candidate34_primary24_fallback20",
+                        "target_count": 24,
+                        "fallback_target_count": 20,
+                        "source_counts": CONSTRAINED_SOURCE_COUNTS,
+                        "final_source_counts": CONSTRAINED_PRIMARY_FINAL_SOURCE_COUNTS,
+                        "fallback_final_source_counts": CONSTRAINED_FALLBACK_FINAL_SOURCE_COUNTS,
+                    }
+                ),
+            ]
+        )
     route_rows = []
     availability_rows = []
     route_attempts = []
@@ -931,17 +1319,19 @@ def choose_route(exclusion_sets: dict[str, set[str]]) -> tuple[dict, list[dict],
         records, audit_rows = select_source_records(route["source_counts"], exclusion_sets)
         route_attempts.append((route, records, audit_rows))
         required_count = sum(route["source_counts"].values())
+        # source별 shortfall이 candidate probe 과정에서 여러 번 누적될 수 있어 reviewer-facing 표는 source 단위로 압축한다.
+        missing_by_source = {
+            row["source_subset"]: f"{row['source_subset']}:{row['selected_count']}/{row['required_count']}"
+            for row in audit_rows
+            if row.get("selected_count") != row.get("required_count")
+        }
         route_rows.append(
             {
                 "route_label": route["route_label"],
                 "candidate_required": str(required_count),
                 "candidate_available_for_required_sources": str(len(records)),
                 "feasible": YES if len(records) == required_count else NO,
-                "missing_source_quota": "; ".join(
-                    f"{row['source_subset']}:{row['selected_count']}/{row['required_count']}"
-                    for row in audit_rows
-                    if row.get("selected_count") != row.get("required_count")
-                ),
+                "missing_source_quota": "; ".join(missing_by_source[source_subset] for source_subset in sorted(missing_by_source)),
                 "primary_final_target": str(route["target_count"]),
                 "fallback_final_target": str(route.get("fallback_target_count", "")),
             }
@@ -1025,6 +1415,9 @@ def write_preflight(seed_rows: list[dict], exclusion_sets: dict[str, set[str]], 
         f"- final_split_target: `train {ACTIVE_ROUTE.get('final_train_count', '')} / dev {ACTIVE_ROUTE.get('final_dev_count', '')} / test {ACTIVE_ROUTE.get('final_test_count', '')}`",
         f"- fallback_final_target_count: `{ACTIVE_ROUTE.get('fallback_target_count', '')}`",
         f"- source_balance_relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
+        f"- eval_targeting_contract: `{ACTIVE_ROUTE.get('eval_targeting_contract', '없음')}`",
+        f"- eval_balanced_doc_types: `{ACTIVE_ROUTE.get('eval_balanced_doc_types', [])}`",
+        f"- eval_avoid_doc_types: `{ACTIVE_ROUTE.get('eval_avoid_doc_types', [])}`",
         f"- doc_type_counts: `{dict(doc_counts)}`",
         f"- lane_counts: `{dict(lane_counts)}`",
         f"- reuse_tier_counts: `{dict(reuse_counts)}`",
@@ -1045,6 +1438,7 @@ def write_preflight(seed_rows: list[dict], exclusion_sets: dict[str, set[str]], 
             "| no batch family_id/label_path/raw_path duplicate | `pass` |",
             "| prior overlap policy | `pass` | Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용 |",
             "| global eval and quality tail exclusion | `pass` | dev/test, audit, hard/soft fail family는 재사용 금지 |",
+            f"| eval targeting contract | `{'pass' if ACTIVE_ROUTE.get('eval_targeting_contract') else 'not_applicable'}` | {ACTIVE_ROUTE.get('eval_targeting_contract', '일반 global split 사용')} |",
         ]
     )
     write_text_atomic(SEED_PREFLIGHT_MD_PATH, "\n".join(lines) + "\n")
@@ -1137,6 +1531,87 @@ def is_tier2_train_locked(row: dict) -> bool:
     )
 
 
+def eval_candidate_sort_key(row: dict) -> tuple:
+    priority_doc_types = ACTIVE_ROUTE.get("eval_priority_doc_types", [])
+    avoid_doc_types = set(ACTIVE_ROUTE.get("eval_avoid_doc_types", []))
+    doc_type = row.get("doc_type_name", "")
+    if doc_type in priority_doc_types:
+        priority = priority_doc_types.index(doc_type)
+    elif doc_type in avoid_doc_types:
+        priority = 99
+    else:
+        priority = 50
+    return (
+        priority,
+        row.get("source_subset", ""),
+        -float(row.get("weighted_score", 0) or 0),
+        row.get("seed_sample_id", ""),
+    )
+
+
+def round_robin_by_doc_type(rows_by_doc_type: dict[str, list[dict]], doc_types: list[str]) -> list[dict]:
+    # dev/test가 한 문서유형으로만 쏠리지 않게 법령/결정례 eval 후보를 교차 배치한다.
+    ordered: list[dict] = []
+    max_count = max((len(rows_by_doc_type.get(doc_type, [])) for doc_type in doc_types), default=0)
+    for index in range(max_count):
+        for doc_type in doc_types:
+            rows = rows_by_doc_type.get(doc_type, [])
+            if index < len(rows):
+                ordered.append(rows[index])
+    return ordered
+
+
+def choose_eval_target_rows(rows: list[dict], eval_count: int) -> list[dict]:
+    # reviewer P2: 다음 source-reallocated run은 총량 반복이 아니라 법령/결정례 eval 부족을 먼저 보강한다.
+    # Tier 2 split-lock row는 호출 전 제외되어 있어, 여기서 뽑힌 row만 dev/test 후보가 된다.
+    if eval_count <= 0:
+        return []
+    balanced_doc_types = ACTIVE_ROUTE.get("eval_balanced_doc_types", [])
+    target_doc_counts = ACTIVE_ROUTE.get("eval_target_doc_counts", {})
+    selected: list[dict] = []
+    selected_ids: set[str] = set()
+    if target_doc_counts:
+        for doc_type, target_count in target_doc_counts.items():
+            doc_rows = sorted(
+                [row for row in rows if row.get("doc_type_name") == doc_type],
+                key=eval_candidate_sort_key,
+            )
+            if len(doc_rows) < int(target_count):
+                raise RuntimeError(
+                    f"eval_targeting_doc_count_failed: doc_type={doc_type}, required={target_count}, available={len(doc_rows)}"
+                )
+            for row in doc_rows[: int(target_count)]:
+                selected.append(row)
+                selected_ids.add(row["candidate_id"])
+    elif balanced_doc_types:
+        target_per_doc = {doc_type: eval_count // len(balanced_doc_types) for doc_type in balanced_doc_types}
+        for doc_type in balanced_doc_types[: eval_count % len(balanced_doc_types)]:
+            target_per_doc[doc_type] += 1
+        by_doc_type = {
+            doc_type: sorted(
+                [row for row in rows if row.get("doc_type_name") == doc_type],
+                key=eval_candidate_sort_key,
+            )[:target_per_doc[doc_type]]
+            for doc_type in balanced_doc_types
+        }
+        for row in round_robin_by_doc_type(by_doc_type, balanced_doc_types):
+            selected.append(row)
+            selected_ids.add(row["candidate_id"])
+    if len(selected) < eval_count:
+        for row in sorted(rows, key=eval_candidate_sort_key):
+            if row["candidate_id"] in selected_ids:
+                continue
+            selected.append(row)
+            selected_ids.add(row["candidate_id"])
+            if len(selected) == eval_count:
+                break
+    if len(selected) < eval_count:
+        raise RuntimeError(
+            f"eval_targeting_split_failed: required_eval={eval_count}, available_tier0={len(rows)}"
+        )
+    return selected[:eval_count]
+
+
 def split_for_final_rows(final_rows: list[dict]) -> list[dict]:
     # reviewer 권장 split은 final 40 = 32/4/4, final 24 = 20/2/2, fallback final 20 = 16/2/2라서
     # doc-type별 1/1 eval보다 global split을 우선한다.
@@ -1161,6 +1636,32 @@ def split_for_final_rows(final_rows: list[dict]) -> list[dict]:
     if not dev_count and not test_count:
         _, dev_count, test_count = final_split_counts(total)
     train_count = max(total - dev_count - test_count, sum(1 for row in ordered_rows if is_tier2_train_locked(row)))
+    if ACTIVE_ROUTE.get("eval_targeting_contract"):
+        non_locked_rows = [row for row in ordered_rows if not is_tier2_train_locked(row)]
+        eval_rows = choose_eval_target_rows(non_locked_rows, dev_count + test_count)
+        dev_ids = {row["candidate_id"] for row in eval_rows[:dev_count]}
+        test_ids = {row["candidate_id"] for row in eval_rows[dev_count : dev_count + test_count]}
+        with_splits = []
+        for row in ordered_rows:
+            if row["candidate_id"] in dev_ids:
+                split = "dev"
+                eval_target_role = "eval_targeted_dev"
+            elif row["candidate_id"] in test_ids:
+                split = "test"
+                eval_target_role = "eval_targeted_test"
+            else:
+                split = "train"
+                eval_target_role = "train_after_eval_targeting"
+            with_splits.append(
+                {
+                    **row,
+                    "split": split,
+                    "dataset_disposition": split,
+                    "eval_targeting_role": eval_target_role,
+                    "eval_targeting_contract": ACTIVE_ROUTE.get("eval_targeting_contract", ""),
+                }
+            )
+        return sorted(with_splits, key=lambda item: int(item["selection_rank"]))
     with_splits: list[dict] = []
     for index, row in enumerate(ordered_rows):
         split = "train" if index < train_count else "dev" if index < train_count + dev_count else "test"
@@ -1311,6 +1812,8 @@ def final_payload(row: dict) -> dict:
         "count_allowed": row.get("count_allowed", NO),
         "count_disposition": row.get("count_disposition", COUNT_DISPOSITION),
         "promotion_contract_status": row.get("promotion_contract_status", PROMOTION_CONTRACT_STATUS),
+        "eval_targeting_role": row.get("eval_targeting_role", ""),
+        "eval_targeting_contract": row.get("eval_targeting_contract", ""),
         "split": row["split"],
     }
 
@@ -1326,6 +1829,7 @@ def write_compiled_outputs(compiled: dict[str, list[dict]], merged_rows: list[di
                 "family_id": row["family_id"],
                 "doc_type_name": row["doc_type_name"],
                 "source_subset": row["source_subset"],
+                "sampling_lane": row.get("sampling_lane", ""),
                 "reuse_tier": row.get("reuse_tier", ""),
                 "source_task": row.get("source_task", ""),
                 "source_split": row.get("source_split", ""),
@@ -1344,6 +1848,8 @@ def write_compiled_outputs(compiled: dict[str, list[dict]], merged_rows: list[di
                 "count_allowed": row.get("count_allowed", NO),
                 "count_disposition": row.get("count_disposition", COUNT_DISPOSITION),
                 "promotion_contract_status": row.get("promotion_contract_status", PROMOTION_CONTRACT_STATUS),
+                "eval_targeting_role": row.get("eval_targeting_role", ""),
+                "eval_targeting_contract": row.get("eval_targeting_contract", ""),
             }
         )
     for split_name in ["train", "dev", "test"]:
@@ -1385,6 +1891,7 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
     doc_counts = Counter(row["doc_type_name"] for row in final_rows)
     source_counts = Counter(row["source_subset"] for row in final_rows)
     split_counts = Counter(row["split"] for row in final_rows)
+    eval_doc_counts = Counter(row["doc_type_name"] for row in final_rows if row["split"] in {"dev", "test"})
     reuse_counts = Counter(row.get("reuse_tier", "") for row in final_rows)
     summary_rows = [
         {
@@ -1420,9 +1927,11 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
         f"- active_final_route: `{ACTIVE_ROUTE.get('active_final_route_label', 'primary_final')}`",
         f"- active_final_target_count: `{ACTIVE_ROUTE.get('active_final_target_count', ACTIVE_ROUTE['target_count'])}`",
         f"- source_balance_relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
+        f"- eval_targeting_contract: `{ACTIVE_ROUTE.get('eval_targeting_contract', '없음')}`",
         f"- quality_tail_total: `{len(compiled['quality_tail'])}`",
         f"- quota_surplus_total: `{len(compiled['quota_surplus'])}`",
         f"- split_counts: `{dict(split_counts)}`",
+        f"- eval_doc_type_counts: `{dict(eval_doc_counts)}`",
         f"- reuse_tier_counts: `{dict(reuse_counts)}`",
         "",
         "## final doc type counts",
@@ -1453,6 +1962,8 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
         f"| final_package_total | `{len(final_rows)}` |",
         f"| active_final_route | `{ACTIVE_ROUTE.get('active_final_route_label', 'primary_final')}` |",
         f"| active_final_target_count | `{ACTIVE_ROUTE.get('active_final_target_count', ACTIVE_ROUTE['target_count'])}` |",
+        f"| eval_targeting_contract | `{ACTIVE_ROUTE.get('eval_targeting_contract', '없음')}` |",
+        f"| eval_doc_type_counts | `{dict(eval_doc_counts)}` |",
         f"| hard_soft_audit_in_final | `0/0/0` |",
         f"| manifest_count | `{len(manifest_rows)}` |",
         f"| train/dev/test | `{split_counts.get('train', 0)}/{split_counts.get('dev', 0)}/{split_counts.get('test', 0)}` |",
@@ -1466,6 +1977,7 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
         f"- constrained route: `primary final 24, fallback final 20 / candidate {sum(CONSTRAINED_SOURCE_COUNTS.values())}`",
         f"- active route: `{ACTIVE_ROUTE['route_label']}`",
         f"- source-balance relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
+        f"- eval-targeting contract: `{ACTIVE_ROUTE.get('eval_targeting_contract', '없음')}`",
         "- seed policy: Tier 0 fresh-only 우선, 부족분은 objective train family의 Tier 2 train-only split-lock reuse 허용",
         "- count rule: candidate 전체가 아니라 strict final package만 API-first contract 기준으로 count 후보",
         "",
@@ -1476,6 +1988,7 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
 def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows: list[dict], compiled: dict[str, list[dict]]) -> dict:
     final_rows = compiled["final_rows"]
     split_counts = Counter(row.get("split", "") for row in final_rows)
+    eval_doc_counts = Counter(row["doc_type_name"] for row in final_rows if row.get("split") in {"dev", "test"})
     reuse_counts = Counter(row.get("reuse_tier", "") for row in final_rows)
     active_final_target_count = int(ACTIVE_ROUTE.get("active_final_target_count", ACTIVE_ROUTE["target_count"]))
     success = len(final_rows) == active_final_target_count
@@ -1509,6 +2022,11 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
         "rejected_total": len(compiled["rejected_pool"]),
         "active_final_route": ACTIVE_ROUTE.get("active_final_route_label", "primary_final"),
         "active_final_target_count": active_final_target_count,
+        "eval_targeting_contract": ACTIVE_ROUTE.get("eval_targeting_contract", ""),
+        "eval_balanced_doc_types": ACTIVE_ROUTE.get("eval_balanced_doc_types", []),
+        "eval_priority_doc_types": ACTIVE_ROUTE.get("eval_priority_doc_types", []),
+        "eval_avoid_doc_types": ACTIVE_ROUTE.get("eval_avoid_doc_types", []),
+        "eval_doc_type_counts": dict(eval_doc_counts),
         "quality_tail_total": len(compiled["quality_tail"]),
         "quota_surplus_total": len(compiled["quota_surplus"]),
         "generation_count": base.load_jsonl_count(GENERATED_PROBLEMS_PATH),
@@ -1541,6 +2059,13 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
         },
         "api_call_summary": api_call_summary,
         "total_api_calls": api_call_summary["total_api_calls"],
+        # reviewer-facing alias: emergency repeat에서는 생성/Judge worker 수가 stop line P2라 manifest에 직접 남긴다.
+        "generation_main_max_workers": base.GENERATOR_MAIN_MAX_WORKERS,
+        "generation_strict_max_workers": base.GENERATOR_STRICT_MAX_WORKERS,
+        "generation_main_checkpoint_every": base.GENERATOR_MAIN_CHECKPOINT_EVERY,
+        "judge_main_max_workers": base.JUDGE_MAIN_MAX_WORKERS,
+        "judge_main_max_attempts": base.JUDGE_MAIN_MAX_ATTEMPTS,
+        "judge_main_checkpoint_every": base.JUDGE_MAIN_CHECKPOINT_EVERY,
         # linter/evidence 실행 직후 sync step에서 true로 전환한다. false를 명시해 handoff alias 누락을 방지한다.
         "artifact_linter_passed": False,
         "evidence_card_passed": False,
@@ -1590,21 +2115,131 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
             "split_lock_eval_hotfix_status": "passed",
             "api_call_summary": api_call_summary,
             "total_api_calls": api_call_summary["total_api_calls"],
+            "generation_main_max_workers": base.GENERATOR_MAIN_MAX_WORKERS,
+            "generation_strict_max_workers": base.GENERATOR_STRICT_MAX_WORKERS,
+            "generation_main_checkpoint_every": base.GENERATOR_MAIN_CHECKPOINT_EVERY,
+            "judge_main_max_workers": base.JUDGE_MAIN_MAX_WORKERS,
+            "judge_main_max_attempts": base.JUDGE_MAIN_MAX_ATTEMPTS,
+            "judge_main_checkpoint_every": base.JUDGE_MAIN_CHECKPOINT_EVERY,
             "artifact_linter_passed": False,
             "evidence_card_passed": False,
             "evidence_card_all_green": False,
             "active_final_route_label": ACTIVE_ROUTE.get("active_final_route_label", "primary_final"),
             "active_final_target_count": active_final_target_count,
+            "eval_targeting_contract": ACTIVE_ROUTE.get("eval_targeting_contract", ""),
+            "eval_doc_type_counts": dict(eval_doc_counts),
             "success_result": manifest["success_result"],
         },
     )
     return manifest
 
 
+def write_preflight_manifest(seed_rows: list[dict]) -> dict:
+    # preflight-only run도 reviewer가 stale path 없이 검산할 수 있도록 최소 manifest를 남긴다.
+    manifest = {
+        "version_tag": VERSION_TAG,
+        "run_name": RUN_NAME,
+        "created_at_utc": base.utc_now_iso(),
+        "route_name": ROUTE_NAME,
+        "route_label": ACTIVE_ROUTE["route_label"],
+        "package_role": "preflight_only",
+        "batch_status": "preflight_only_not_counted",
+        "count_reflection_status": "not_counted_preflight_only",
+        "downstream_consumption_allowed": NO,
+        "count_allowed": NO,
+        "count_disposition": "preflight_only_not_counted",
+        "promotion_contract_status": "preflight_only",
+        "seed_registry_strategy": "tier0_fresh_first_with_tier2_objective_train_split_locked_reuse",
+        "seed_registry_count": len(seed_rows),
+        "candidate_total": 0,
+        "accepted_total": 0,
+        "final_package_total": 0,
+        "rejected_total": 0,
+        "quality_tail_total": 0,
+        "quota_surplus_total": 0,
+        "active_final_route": ACTIVE_ROUTE.get("active_final_route_label", f"primary_final{ACTIVE_ROUTE['target_count']}"),
+        "active_final_target_count": ACTIVE_ROUTE["target_count"],
+        "eval_targeting_contract": ACTIVE_ROUTE.get("eval_targeting_contract", ""),
+        "eval_balanced_doc_types": ACTIVE_ROUTE.get("eval_balanced_doc_types", []),
+        "eval_priority_doc_types": ACTIVE_ROUTE.get("eval_priority_doc_types", []),
+        "eval_avoid_doc_types": ACTIVE_ROUTE.get("eval_avoid_doc_types", []),
+        "generation_main_max_workers": base.GENERATOR_MAIN_MAX_WORKERS,
+        "generation_strict_max_workers": base.GENERATOR_STRICT_MAX_WORKERS,
+        "generation_main_checkpoint_every": base.GENERATOR_MAIN_CHECKPOINT_EVERY,
+        "judge_main_max_workers": base.JUDGE_MAIN_MAX_WORKERS,
+        "judge_main_max_attempts": base.JUDGE_MAIN_MAX_ATTEMPTS,
+        "judge_main_checkpoint_every": base.JUDGE_MAIN_CHECKPOINT_EVERY,
+        "success_result": {
+            "passed": len(seed_rows) == sum(ACTIVE_ROUTE["source_counts"].values()),
+            "reason": "preflight source schedule satisfied",
+        },
+        "artifact_paths": {
+            "seed_registry": repo_rel(SEED_REGISTRY_PATH),
+            "seed_ready": repo_rel(SEED_READY_PATH),
+            "seed_preflight": repo_rel(SEED_PREFLIGHT_MD_PATH),
+            "seed_availability_map": repo_rel(AVAILABILITY_MAP_MD_PATH),
+            "route_feasibility": repo_rel(AVAILABILITY_ROUTE_FEASIBILITY_CSV_PATH),
+        },
+    }
+    base.write_json_atomic(RUN_MANIFEST_PATH, manifest)
+    return manifest
+
+
+def write_preflight_blocker_manifest(error: Exception) -> dict:
+    # route가 모두 막힌 경우에도 crash만 남기지 않고, reviewer가 다음 API route를 판단할 수 있는 blocker manifest를 남긴다.
+    manifest = {
+        "version_tag": VERSION_TAG,
+        "run_name": RUN_NAME,
+        "created_at_utc": base.utc_now_iso(),
+        "route_name": ROUTE_NAME,
+        "package_role": "preflight_blocked",
+        "batch_status": "preflight_blocked_seed_availability",
+        "count_reflection_status": "not_counted_preflight_blocked",
+        "downstream_consumption_allowed": NO,
+        "count_allowed": NO,
+        "count_disposition": "preflight_blocked_not_counted",
+        "promotion_contract_status": "preflight_blocked",
+        "seed_registry_count": 0,
+        "candidate_total": 0,
+        "accepted_total": 0,
+        "final_package_total": 0,
+        "rejected_total": 0,
+        "quality_tail_total": 0,
+        "quota_surplus_total": 0,
+        "generation_main_max_workers": base.GENERATOR_MAIN_MAX_WORKERS,
+        "generation_strict_max_workers": base.GENERATOR_STRICT_MAX_WORKERS,
+        "generation_main_checkpoint_every": base.GENERATOR_MAIN_CHECKPOINT_EVERY,
+        "judge_main_max_workers": base.JUDGE_MAIN_MAX_WORKERS,
+        "judge_main_max_attempts": base.JUDGE_MAIN_MAX_ATTEMPTS,
+        "judge_main_checkpoint_every": base.JUDGE_MAIN_CHECKPOINT_EVERY,
+        "success_result": {
+            "passed": False,
+            "reason": str(error),
+        },
+        "artifact_paths": {
+            "seed_availability_map": repo_rel(AVAILABILITY_MAP_MD_PATH),
+            "route_feasibility": repo_rel(AVAILABILITY_ROUTE_FEASIBILITY_CSV_PATH),
+        },
+    }
+    base.write_json_atomic(RUN_MANIFEST_PATH, manifest)
+    return manifest
+
+
 def main() -> dict:
     configure_base_paths()
-    seed_rows = build_seed_registry()
+    try:
+        seed_rows = build_seed_registry()
+    except RuntimeError as exc:
+        if "descriptive_seed_availability_blocker" not in str(exc):
+            raise
+        manifest = write_preflight_blocker_manifest(exc)
+        print(f"[descriptive wave] preflight_blocked reason={manifest['success_result']['reason']}", flush=True)
+        return manifest
     print(f"[descriptive wave] route={ACTIVE_ROUTE['route_label']} candidates={len(seed_rows)}", flush=True)
+    if os.environ.get("DESCRIPTIVE_WAVE_PREFLIGHT_ONLY") == "1":
+        manifest = write_preflight_manifest(seed_rows)
+        print(f"[descriptive wave] preflight_only success={manifest['success_result']['passed']}", flush=True)
+        return manifest
     base.run_generation(mode="main")
     base.run_generation(mode="strict_finalize")
     base.run_judges(mode="main")

@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -96,6 +97,29 @@ GENERATOR_API_TIMEOUT_SECONDS = 45
 JUDGE_API_TIMEOUT_SECONDS = 60
 GENERATOR_MAIN_CHECKPOINT_EVERY = 4
 GENERATOR_STRICT_CHECKPOINT_EVERY = 2
+
+
+def int_env_override(default_value, *env_names):
+    # 마감 대응 wave는 wrapper/env에서 worker 수를 올릴 수 있어야 하므로, 공통 objective runner에 alias를 둔다.
+    for env_name in env_names:
+        raw_value = os.environ.get(env_name)
+        if raw_value:
+            return int(raw_value)
+    return default_value
+
+
+GENERATOR_MAIN_MAX_WORKERS = int_env_override(
+    1,
+    "OBJECTIVE_GENERATION_MAIN_MAX_WORKERS",
+    "OBJECTIVE_WAVE_GENERATION_MAIN_MAX_WORKERS",
+    "OBJECTIVE_NON_LAW_GENERATION_MAIN_MAX_WORKERS",
+)
+GENERATOR_STRICT_MAX_WORKERS = int_env_override(
+    1,
+    "OBJECTIVE_GENERATION_STRICT_MAX_WORKERS",
+    "OBJECTIVE_WAVE_GENERATION_STRICT_MAX_WORKERS",
+    "OBJECTIVE_NON_LAW_GENERATION_STRICT_MAX_WORKERS",
+)
 JUDGE_MAIN_MAX_WORKERS = 4
 JUDGE_MAIN_MAX_ATTEMPTS = 4
 JUDGE_MAIN_RETRY_BASE_SECONDS = 3
@@ -428,16 +452,62 @@ def run_generation(mode="main"):
     seeds = load_jsonl(SEED_READY_PATH)
     reference_v2_map = load_reference_v2_rows()
     rows = load_existing_generation_rows()
-    completed_candidate_ids = {row["candidate_id"] for row in rows}
+    rows_by_candidate = {row["candidate_id"]: row for row in rows}
+    completed_candidate_ids = set(rows_by_candidate)
+    pending_seeds = []
 
     for seed in seeds:
         candidate_id = f"{seed['seed_sample_id']}::objective_{VERSION_TAG}"
         if candidate_id in completed_candidate_ids:
             continue
-        rows.append(generate_one(seed, reference_v2_map.get(seed["seed_sample_id"], {}), strict_mode=strict_mode))
-        completed_candidate_ids.add(candidate_id)
-        checkpoint_generation_rows(rows, strict_mode)
+        pending_seeds.append(seed)
 
+    max_workers = GENERATOR_STRICT_MAX_WORKERS if strict_mode else GENERATOR_MAIN_MAX_WORKERS
+    checkpoint_every = GENERATOR_STRICT_CHECKPOINT_EVERY if strict_mode else GENERATOR_MAIN_CHECKPOINT_EVERY
+    if pending_seeds and max_workers > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(
+                    generate_one,
+                    seed,
+                    reference_v2_map.get(seed["seed_sample_id"], {}),
+                    strict_mode=strict_mode,
+                ): f"{seed['seed_sample_id']}::objective_{VERSION_TAG}"
+                for seed in pending_seeds
+            }
+            completed_since_checkpoint = 0
+            for future in as_completed(future_map):
+                candidate_id = future_map[future]
+                rows_by_candidate[candidate_id] = future.result()
+                completed_since_checkpoint += 1
+                if completed_since_checkpoint >= checkpoint_every:
+                    ordered_rows = [
+                        rows_by_candidate[f"{seed['seed_sample_id']}::objective_{VERSION_TAG}"]
+                        for seed in seeds
+                        if f"{seed['seed_sample_id']}::objective_{VERSION_TAG}" in rows_by_candidate
+                    ]
+                    checkpoint_generation_rows(ordered_rows, strict_mode)
+                    completed_since_checkpoint = 0
+    else:
+        for seed in pending_seeds:
+            candidate_id = f"{seed['seed_sample_id']}::objective_{VERSION_TAG}"
+            rows_by_candidate[candidate_id] = generate_one(
+                seed,
+                reference_v2_map.get(seed["seed_sample_id"], {}),
+                strict_mode=strict_mode,
+            )
+            ordered_rows = [
+                rows_by_candidate[f"{ordered_seed['seed_sample_id']}::objective_{VERSION_TAG}"]
+                for ordered_seed in seeds
+                if f"{ordered_seed['seed_sample_id']}::objective_{VERSION_TAG}" in rows_by_candidate
+            ]
+            checkpoint_generation_rows(ordered_rows, strict_mode)
+
+    rows = [
+        rows_by_candidate[f"{seed['seed_sample_id']}::objective_{VERSION_TAG}"]
+        for seed in seeds
+        if f"{seed['seed_sample_id']}::objective_{VERSION_TAG}" in rows_by_candidate
+    ]
     write_jsonl_atomic(GENERATED_PROBLEMS_PATH, rows)
     return rows
 
@@ -1126,6 +1196,10 @@ def build_run_manifest(seed_rows, merged_rows, manifest_rows, side_by_side_rows)
         "reference_v2_merged_path": str(REFERENCE_V2_MERGED_PATH),
         "seed_registry_strategy": "reuse_v2_16_family_comparator_seed_set",
         "seed_registry_count": len(seed_rows),
+        "generation_main_max_workers": GENERATOR_MAIN_MAX_WORKERS,
+        "generation_strict_max_workers": GENERATOR_STRICT_MAX_WORKERS,
+        "judge_main_max_workers": JUDGE_MAIN_MAX_WORKERS,
+        "judge_strict_max_workers": JUDGE_STRICT_MAX_WORKERS,
         "generation_count": load_jsonl_count(GENERATED_PROBLEMS_PATH),
         "judge_grounding_count": load_jsonl_count(GROUNDING_LOG_PATH),
         "judge_keyedness_count": load_jsonl_count(KEYEDNESS_LOG_PATH),

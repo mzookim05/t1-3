@@ -910,6 +910,8 @@ def build_batch_summary(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def run_post_compile_validation() -> dict[str, Any]:
+    # linter fixture가 run_manifest 안의 linter/evidence path 자체를 검산하므로,
+    # 첫 pass로 파일을 만든 뒤 두 번째 pass에서 self-reference까지 확인한다.
     linter_cmd = [
         sys.executable,
         str(PROJECT_ROOT / "scripts" / "aihub" / "problem_generation" / "shared" / "artifact_linter.py"),
@@ -928,6 +930,8 @@ def run_post_compile_validation() -> dict[str, Any]:
         "--linter-report-dir",
         str(RUN_LINTER_DIR),
     ]
+    subprocess.run(linter_cmd, cwd=PROJECT_ROOT, text=True, capture_output=True)
+    subprocess.run(evidence_cmd, cwd=PROJECT_ROOT, text=True, capture_output=True)
     linter = subprocess.run(linter_cmd, cwd=PROJECT_ROOT, text=True, capture_output=True)
     evidence = subprocess.run(evidence_cmd, cwd=PROJECT_ROOT, text=True, capture_output=True)
     return {
@@ -969,6 +973,10 @@ def build_run_manifest(
         "candidate_recipe_source": f"v2_difficulty_patch_r2_{VERSION_TAG}",
         "seed_registry_strategy": f"fixed_from_{SOURCE_PREFLIGHT_RUN_NAME}",
         "seed_registry_count": len(seed_rows),
+        "generation_main_max_workers": pb6.pb4.pb3.base.GENERATOR_MAIN_MAX_WORKERS,
+        "generation_strict_max_workers": pb6.pb4.pb3.base.GENERATOR_STRICT_MAX_WORKERS,
+        "judge_main_max_workers": pb6.pb4.pb3.base.JUDGE_MAIN_MAX_WORKERS,
+        "judge_strict_max_workers": pb6.pb4.pb3.base.JUDGE_STRICT_MAX_WORKERS,
         "candidate_total": COMPILER_RESULT.get("candidate_total", 0),
         "accepted_total": COMPILER_RESULT.get("accepted_total", 0),
         "final_package_total": len(final_rows),

@@ -86,6 +86,8 @@ JUDGE_TEMPERATURE = 0.1
 GENERATOR_MAX_TOKENS = 600
 GENERATOR_API_TIMEOUT_SECONDS = 45
 JUDGE_API_TIMEOUT_SECONDS = 60
+GENERATOR_MAIN_MAX_WORKERS = 1
+GENERATOR_STRICT_MAX_WORKERS = 1
 GENERATOR_MAIN_CHECKPOINT_EVERY = 4
 GENERATOR_STRICT_CHECKPOINT_EVERY = 2
 JUDGE_MAIN_MAX_WORKERS = 4
@@ -353,6 +355,25 @@ def checkpoint_generation_rows(rows, strict_mode):
         write_jsonl_atomic(GENERATED_PROBLEMS_PATH, rows)
 
 
+def generation_mode_config(strict_mode):
+    # 기본 production runner는 기존처럼 순차 생성한다. 단, deadline emergency wave는
+    # wrapper가 환경변수로 worker 수를 올려 API wall time을 줄일 수 있게 둔다.
+    return {
+        "max_workers": GENERATOR_STRICT_MAX_WORKERS if strict_mode else GENERATOR_MAIN_MAX_WORKERS,
+        "checkpoint_every": GENERATOR_STRICT_CHECKPOINT_EVERY if strict_mode else GENERATOR_MAIN_CHECKPOINT_EVERY,
+    }
+
+
+def ordered_generation_rows(seeds, rows_by_candidate):
+    # 병렬 생성의 완료 순서는 비결정적이므로 seed order로 되돌려 checkpoint와 downstream diff를 안정화한다.
+    ordered = []
+    for seed in seeds:
+        candidate_id = f"{seed['seed_sample_id']}::split_descriptive_{VERSION_TAG}"
+        if candidate_id in rows_by_candidate:
+            ordered.append(rows_by_candidate[candidate_id])
+    return ordered
+
+
 def generate_one(seed, strict_mode):
     candidate_id = f"{seed['seed_sample_id']}::split_descriptive_{VERSION_TAG}"
     while True:
@@ -412,18 +433,40 @@ def generate_one(seed, strict_mode):
 def run_generation(mode="main"):
     snapshot_prompts(["generator_system_descriptive.txt", "generator_user_template_descriptive.md"], RUN_PROMPTS_DIR)
     strict_mode = mode == "strict_finalize"
+    mode_config = generation_mode_config(strict_mode)
     seeds = load_jsonl(SEED_READY_PATH)
     rows = load_existing_generation_rows()
-    completed_candidate_ids = {row["candidate_id"] for row in rows}
+    rows_by_candidate = {row["candidate_id"]: row for row in rows}
+    completed_candidate_ids = set(rows_by_candidate)
+    pending_seeds = []
 
     for seed in seeds:
         candidate_id = f"{seed['seed_sample_id']}::split_descriptive_{VERSION_TAG}"
         if candidate_id in completed_candidate_ids:
             continue
-        rows.append(generate_one(seed, strict_mode=strict_mode))
-        completed_candidate_ids.add(candidate_id)
-        checkpoint_generation_rows(rows, strict_mode)
+        pending_seeds.append(seed)
 
+    if pending_seeds and mode_config["max_workers"] > 1:
+        with ThreadPoolExecutor(max_workers=mode_config["max_workers"]) as executor:
+            future_map = {
+                executor.submit(generate_one, seed, strict_mode=strict_mode): f"{seed['seed_sample_id']}::split_descriptive_{VERSION_TAG}"
+                for seed in pending_seeds
+            }
+            completed_since_checkpoint = 0
+            for future in as_completed(future_map):
+                candidate_id = future_map[future]
+                rows_by_candidate[candidate_id] = future.result()
+                completed_since_checkpoint += 1
+                if completed_since_checkpoint >= mode_config["checkpoint_every"]:
+                    write_jsonl_atomic(GENERATED_PROBLEMS_PATH, ordered_generation_rows(seeds, rows_by_candidate))
+                    completed_since_checkpoint = 0
+    else:
+        for seed in pending_seeds:
+            candidate_id = f"{seed['seed_sample_id']}::split_descriptive_{VERSION_TAG}"
+            rows_by_candidate[candidate_id] = generate_one(seed, strict_mode=strict_mode)
+            checkpoint_generation_rows(ordered_generation_rows(seeds, rows_by_candidate), strict_mode)
+
+    rows = ordered_generation_rows(seeds, rows_by_candidate)
     write_jsonl_atomic(GENERATED_PROBLEMS_PATH, rows)
     return rows
 
