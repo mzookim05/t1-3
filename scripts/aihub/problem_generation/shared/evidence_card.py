@@ -210,7 +210,9 @@ def summarize_package(spec: PackageSpec) -> dict[str, Any]:
     manifest_rows, _ = read_csv_rows(spec.processed_package_dir / "dataset_manifest.csv")
     final_rows, _ = read_csv_rows(spec.run_dir / "exports" / f"final_package_{spec.version_tag}.csv")
     merged_rows, _ = read_csv_rows(spec.run_dir / "merged" / f"merged_problem_scores_{spec.version_tag}.csv")
-    validator_rows, _ = read_csv_rows(spec.run_dir / "exports" / f"validator_report_{spec.version_tag}.csv")
+    # 서술형 package factory처럼 별도 validator_report를 만들지 않는 run도 있어,
+    # evidence card는 manifest/final rows를 기준으로 gate를 계산하고 validator artifact는 선택 입력으로만 둔다.
+    validator_rows = read_csv_rows_optional(spec.run_dir / "exports" / f"validator_report_{spec.version_tag}.csv")
     candidate_pool_rows = read_csv_rows_optional(spec.run_dir / "candidate_pool.csv")
     accepted_pool_rows = read_csv_rows_optional(spec.run_dir / "accepted_pool.csv")
     rejected_pool_rows = read_csv_rows_optional(spec.run_dir / "rejected_pool.csv")
@@ -228,15 +230,32 @@ def summarize_package(spec: PackageSpec) -> dict[str, Any]:
 
     usable = count_value(manifest_rows, "train_eligible", "예")
     audit = count_value(manifest_rows, "audit_required", "예")
-    hard_fail = count_value(merged_rows, "final_status", "hard_fail")
-    soft_fail = count_value(merged_rows, "final_status", "soft_fail")
-    pass_count = count_value(merged_rows, "final_status", "pass")
+    # Package factory는 rejected/tail candidate를 merged에 함께 보존하므로,
+    # final package evidence에서는 strict final rows만 품질 gate의 분모로 사용한다.
+    quality_rows = final_rows or merged_rows
+    hard_fail = count_value(quality_rows, "final_status", "hard_fail")
+    soft_fail = count_value(quality_rows, "final_status", "soft_fail")
+    pass_count = count_value(quality_rows, "final_status", "pass")
     train = len(split_rows["train"])
     dev = len(split_rows["dev"])
     test = len(split_rows["test"])
-    non_accept = len([row for row in manifest_rows if row.get("validator_action") != "accept"])
-    non_export_ready = len([row for row in manifest_rows if row.get("validator_export_disposition") != "export_ready"])
-    metadata_mismatch = len([row for row in manifest_rows if row.get("metadata_remap_ok") != "예"])
+    # 서술형 package에는 objective choice validator field가 없을 수 있어,
+    # 필드가 없는 경우에는 별도 validator gate 미적용으로 해석한다.
+    manifest_fields = set(manifest_rows[0].keys()) if manifest_rows else set()
+    validator_applicable = bool(validator_rows) or bool({"validator_action", "validator_export_disposition"} & manifest_fields)
+    descriptive_rows = manifest_rows if "problem_task_type" in manifest_fields else all_split_rows
+    validator_not_applicable_for_descriptive = (
+        not validator_applicable
+        and bool(descriptive_rows)
+        and all("descriptive" in str(row.get("problem_task_type", "")) for row in descriptive_rows)
+    )
+    non_accept = 0 if "validator_action" not in manifest_fields else len([row for row in manifest_rows if row.get("validator_action") != "accept"])
+    non_export_ready = (
+        0
+        if "validator_export_disposition" not in manifest_fields
+        else len([row for row in manifest_rows if row.get("validator_export_disposition") != "export_ready"])
+    )
+    metadata_mismatch = 0 if "metadata_remap_ok" not in manifest_fields else len([row for row in manifest_rows if row.get("metadata_remap_ok") != "예"])
     shuffle_mismatch = len(
         [
             row
@@ -374,6 +393,8 @@ def summarize_package(spec: PackageSpec) -> dict[str, Any]:
         "pass": pass_count,
         "hard_fail": hard_fail,
         "soft_fail": soft_fail,
+        "validator_applicable": validator_applicable,
+        "validator_not_applicable_for_descriptive": validator_not_applicable_for_descriptive,
         "validator_accept": count_value(manifest_rows, "validator_action", "accept"),
         "validator_export_ready": count_value(manifest_rows, "validator_export_disposition", "export_ready"),
         "validator_non_accept": non_accept,
@@ -481,6 +502,8 @@ def render_package_card(summary: dict[str, Any]) -> str:
         f"| linter_passed | `{str(summary['linter_passed']).lower()}` |",
         f"| linter_blocking_finding_count | `{summary['linter_blocking_finding_count']}` |",
         f"| linter_p3_finding_count | `{summary['linter_p3_finding_count']}` |",
+        f"| validator_applicable | `{str(summary['validator_applicable']).lower()}` |",
+        f"| validator_not_applicable_for_descriptive | `{str(summary['validator_not_applicable_for_descriptive']).lower()}` |",
         f"| validator_accept | `{summary['validator_accept']}` |",
         f"| validator_export_ready | `{summary['validator_export_ready']}` |",
         f"| metadata_remap_mismatch | `{summary['metadata_remap_mismatch']}` |",

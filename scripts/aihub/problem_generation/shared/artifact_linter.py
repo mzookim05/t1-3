@@ -65,6 +65,78 @@ JUDGMENT_072939_RUN = (
     / "llm_runs"
     / "2026-04-26_072939_objective_judgment_repair_a_slot_replacement_package_objective_r2_judgment_repair_a_slot_fresh_replacement"
 )
+DECISION_MEDIUM_062200_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_062200_objective_decision_medium_overgeneration_pilot_objective_r2_decision_target40_candidate64_api_execution"
+)
+DECISION_ADDON_071841_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_071841_objective_decision_addon_overgeneration_pilot_objective_r2_decision_target24_candidate40_api_execution"
+)
+DESCRIPTIVE_WAVE_090909_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_090909_descriptive_wave_v2_constrained_descriptive_v3_split_lock_candidate34_primary24_fallback20_api_execution"
+)
+DESCRIPTIVE_FOLLOWUP_095340_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_095340_descriptive_wave_v2_followup_constrained_descriptive_v3_split_lock_followup_target20_candidate34_api_execution"
+)
+DESCRIPTIVE_SECOND_FOLLOWUP_105251_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_105251_descriptive_wave_v2_second_followup_constrained_descriptive_v3_split_lock_second_followup_target24_candidate34_40_api_execution"
+)
+DESCRIPTIVE_HOTFIX_NEXT_API_113712_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_113712_descriptive_wave_v2_split_lock_hotfix_next_api_descriptive_v3_split_lock_eval_hotfix_medium_primary_constrained_fallback_api_execution"
+)
+DESCRIPTIVE_TAIL_SYNC_FOLLOWUP_122242_RUN = (
+    PROJECT_ROOT
+    / "analysis"
+    / "aihub"
+    / "problem_generation"
+    / "llm_runs"
+    / "2026-04-27_122242_descriptive_tail_manifest_sync_constrained_followup_descriptive_v3_tail_manifest_sync_constrained_followup_api_execution"
+)
+
+
+def latest_llm_run_dir(name_fragment: str) -> Path:
+    # 새 API package는 실행 시각이 매번 달라지므로 fixture가 날짜/시간 prefix에 묶이지 않게 최신 run dir를 찾는다.
+    candidates = sorted((PROJECT_ROOT / "analysis" / "aihub" / "problem_generation" / "llm_runs").glob(f"*{name_fragment}*"))
+    if not candidates:
+        return PROJECT_ROOT / "analysis" / "aihub" / "problem_generation" / "llm_runs" / f"MISSING_{name_fragment}"
+    return candidates[-1]
+
+
+DESCRIPTIVE_MEDIUM_SYNC_RUN = latest_llm_run_dir(
+    "descriptive_inventory_linter_pointer_sync_medium_primary_descriptive_v3_availability_map_medium_primary_api_execution"
+)
+DESCRIPTIVE_MEDIUM_REPEAT_RUN = latest_llm_run_dir(
+    "descriptive_medium_repeat_availability_aware_descriptive_v3_medium_repeat_target40_candidate56_64_api_execution"
+)
 
 
 @dataclass
@@ -315,6 +387,296 @@ def build_fixture_manifest(fixture_root: Path) -> list[dict[str, Any]]:
                 / "objective_judgment_repair_a_slot_replacement_package",
             ),
         },
+        {
+            "fixture_id": "decision_medium_overgeneration_counted_package_pass",
+            "artifact_role": "counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "validator_wiring_expectations": {
+                "stale_phrases": ["reviewer sign-off 전 core current count 미변경"],
+                "required_phrases": [
+                    "`2026-04-27_062129_objective_decision_medium_overgeneration_pilot_preflight_objective_r2_decision_target40_candidate64_seed_spec_wiring_check` seed registry 사용",
+                    "candidate target `A/B/C/D = 16/16/16/16`",
+                    "final export `A/B/C/D = 10/10/10/10`",
+                    "reviewer sign-off 이후 no-API/API-first count reflection 반영 완료",
+                ],
+            },
+            "paths": build_package_factory_counted_paths(
+                DECISION_MEDIUM_062200_RUN,
+                "objective_decision_medium_overgeneration_pilot",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "objective_decision_medium_overgeneration_pilot",
+                seed_preflight=True,
+                evidence=True,
+            ),
+        },
+        {
+            "fixture_id": "decision_addon_overgeneration_counted_package_pass",
+            "artifact_role": "counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "validator_wiring_expectations": {
+                "stale_phrases": ["reviewer sign-off 전 core current count 미변경"],
+                "required_phrases": [
+                    "`2026-04-27_071829_objective_decision_addon_overgeneration_preflight_objective_r2_decision_target24_candidate40_seed_spec_wiring_check` seed registry 사용",
+                    "candidate target `A/B/C/D = 10/10/10/10`",
+                    "final export `A/B/C/D = 6/6/6/6`",
+                    "reviewer sign-off 이후 no-API/API-first count reflection 반영 완료",
+                ],
+            },
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "same 16 seed registry",
+                    "source split is 01/02/03/04 each 4",
+                    "lane split is 8/8",
+                    "target label schedule is A/B/C/D = 4/4/4/4",
+                ],
+                "required_phrases": [
+                    "same 40 seed registry",
+                    "8/6/6/10/10",
+                    "lane split is 20/20",
+                    "target label schedule is A/B/C/D = 10/10/10/10",
+                ],
+            },
+            "paths": build_package_factory_counted_paths(
+                DECISION_ADDON_071841_RUN,
+                "objective_decision_addon_overgeneration_pilot",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "objective_decision_addon_overgeneration_pilot",
+                seed_preflight=True,
+                evidence=True,
+            ),
+        },
+        {
+            "fixture_id": "descriptive_wave_v2_constrained_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "2026-04-27_091842_descriptive_wave_v2_constrained",
+                    "2026-04-27_091814_descriptive_wave_v2_constrained",
+                    "2026-04-27_091755_descriptive_wave_v2_constrained",
+                ],
+                "required_phrases": [
+                    "candidate_count: `34`",
+                    "fallback_final_target_count: `20`",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_WAVE_090909_RUN,
+                "descriptive_wave_v2_constrained",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_wave_v2_constrained",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_wave_v2_followup_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "2026-04-27_091842_descriptive_wave_v2_constrained",
+                    "2026-04-27_090909_descriptive_wave_v2_constrained",
+                ],
+                "required_phrases": [
+                    "candidate_count: `34`",
+                    "fallback_final_target_count: `20`",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_FOLLOWUP_095340_RUN,
+                "descriptive_wave_v2_followup_constrained",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_wave_v2_followup_constrained",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_wave_v2_second_followup_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "2026-04-27_091842_descriptive_wave_v2_constrained",
+                    "2026-04-27_090909_descriptive_wave_v2_constrained",
+                    "2026-04-27_095340_descriptive_wave_v2_followup_constrained",
+                ],
+                "required_phrases": [
+                    "candidate_count: `34`",
+                    "final_target_count: `24`",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_SECOND_FOLLOWUP_105251_RUN,
+                "descriptive_wave_v2_second_followup_constrained",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_wave_v2_second_followup_constrained",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_wave_v2_split_lock_hotfix_next_api_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "descriptive_v3_split_lock_second_followup_target24_candidate34_40_api_execution",
+                    "descriptive_wave_v2_second_followup_constrained_api_execution",
+                ],
+                "required_phrases": [
+                    "candidate_count: `34`",
+                    "final_target_count: `24`",
+                    "fallback_final_target_count: `20`",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_HOTFIX_NEXT_API_113712_RUN,
+                "descriptive_wave_v2_split_lock_hotfix_next_api",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_wave_v2_split_lock_hotfix_next_api",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_tail_manifest_sync_constrained_followup_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "primary_target40_candidate56",
+                    "fallback_target24_candidate36",
+                ],
+                "required_phrases": [
+                    "candidate_count: `34`",
+                    "final_target_count: `24`",
+                    "fallback_final_target_count: `20`",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_TAIL_SYNC_FOLLOWUP_122242_RUN,
+                "descriptive_tail_manifest_sync_constrained_followup",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_tail_manifest_sync_constrained_followup",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_inventory_linter_pointer_sync_medium_primary_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "medium route: `보류`",
+                    "constrained_candidate34_primary24_fallback20",
+                ],
+                "required_phrases": [
+                    "candidate_count: `56`",
+                    "final_target_count: `40`",
+                    "source_balance_relaxation",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_MEDIUM_SYNC_RUN,
+                "descriptive_inventory_linter_pointer_sync_medium_primary",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_inventory_linter_pointer_sync_medium_primary",
+            ),
+        },
+        {
+            "fixture_id": "descriptive_medium_repeat_availability_aware_counted_package_pass",
+            "artifact_role": "descriptive_counted_final_package",
+            "fixture_mode": "live_artifact_check",
+            "expected_result": "pass",
+            "expected_failure_code": "",
+            "expected_failure_codes": [],
+            "seed_preflight_expectations": {
+                "stale_phrases": [
+                    "constrained_candidate34_primary24_fallback20",
+                    "candidate_count: `56`",
+                ],
+                "required_phrases": [
+                    "candidate_count: `64`",
+                    "final_target_count: `40`",
+                    "medium_source_relaxed_candidate64_final40",
+                    "Tier 0 fresh 또는 Tier 2 train-only split-lock만 허용",
+                ],
+            },
+            "paths": build_descriptive_factory_counted_paths(
+                DESCRIPTIVE_MEDIUM_REPEAT_RUN,
+                "descriptive_medium_repeat_availability_aware",
+                processed_dir=PROJECT_ROOT
+                / "data"
+                / "processed"
+                / "aihub"
+                / "problem_generation"
+                / "production_batches"
+                / "descriptive_medium_repeat_availability_aware",
+            ),
+        },
     ]
 
 
@@ -334,6 +696,81 @@ def build_counted_paths(run_dir: Path, version_tag: str, processed_dir: Path) ->
         "final_package_md": repo_rel(run_dir / "exports" / f"final_package_{version_tag}.md"),
         "validator_report_md": repo_rel(run_dir / "exports" / f"validator_report_{version_tag}.md"),
     }
+
+
+def build_package_factory_counted_paths(
+    run_dir: Path,
+    version_tag: str,
+    processed_dir: Path,
+    *,
+    seed_preflight: bool = False,
+    evidence: bool = False,
+) -> dict[str, Any]:
+    # Package factory run은 final package 외에도 pool/tail/surplus와 reviewer-facing gate가 핵심 증거라 함께 검산한다.
+    paths = build_counted_paths(run_dir, version_tag, processed_dir)
+    paths.update(
+        {
+            "candidate_pool_csv": repo_rel(run_dir / "candidate_pool.csv"),
+            "accepted_pool_csv": repo_rel(run_dir / "accepted_pool.csv"),
+            "rejected_pool_csv": repo_rel(run_dir / "rejected_pool.csv"),
+            "tail_taxonomy_csv": repo_rel(run_dir / "tail_taxonomy.csv"),
+            "quota_surplus_csv": repo_rel(run_dir / "quota_surplus_pool.csv"),
+            "validator_wiring_check_md": repo_rel(run_dir / "exports" / f"validator_wiring_check_{version_tag}.md"),
+            "compiler_summary_md": repo_rel(run_dir / "exports" / f"compiler_summary_{version_tag}.md"),
+        }
+    )
+    if seed_preflight:
+        paths["seed_preflight_md"] = repo_rel(run_dir / "exports" / f"seed_preflight_{version_tag}.md")
+    if evidence:
+        paths["evidence_summary_json"] = repo_rel(run_dir / "evidence_card" / "evidence_card_summary.json")
+        paths["evidence_card_package_manifest"] = repo_rel(run_dir / "evidence_card_package_manifest.json")
+    return paths
+
+
+def build_descriptive_factory_counted_paths(
+    run_dir: Path,
+    version_tag: str,
+    processed_dir: Path,
+) -> dict[str, Any]:
+    # 서술형 package factory도 objective와 같은 pool/evidence surface를 검산해
+    # strict final package 밖 row가 count로 새지 않도록 막는다.
+    paths = {
+        "run_manifest": repo_rel(run_dir / "run_manifest.json"),
+        "processed_manifest": repo_rel(processed_dir / "dataset_manifest.csv"),
+        "split_jsonl": [
+            repo_rel(processed_dir / "train.jsonl"),
+            repo_rel(processed_dir / "dev.jsonl"),
+            repo_rel(processed_dir / "test.jsonl"),
+        ],
+        "final_package_csv": repo_rel(run_dir / "exports" / f"final_package_{version_tag}.csv"),
+        "merged_csv": repo_rel(run_dir / "merged" / f"merged_problem_scores_{version_tag}.csv"),
+        "candidate_pool_csv": repo_rel(run_dir / "candidate_pool.csv"),
+        "accepted_pool_csv": repo_rel(run_dir / "accepted_pool.csv"),
+        "rejected_pool_csv": repo_rel(run_dir / "rejected_pool.csv"),
+        "tail_taxonomy_csv": repo_rel(run_dir / "tail_taxonomy.csv"),
+        "quota_surplus_csv": repo_rel(run_dir / "quota_surplus_pool.csv"),
+        "compiler_manifest_json": repo_rel(run_dir / "compiler_manifest.json"),
+        "seed_registry_csv": repo_rel(
+            PROJECT_ROOT
+            / "data"
+            / "interim"
+            / "aihub"
+            / "problem_generation"
+            / "production_batches"
+            / version_tag
+            / "seed_registry.csv"
+        ),
+        "seed_preflight_md": repo_rel(run_dir / "exports" / f"seed_preflight_{version_tag}.md"),
+    }
+    # evidence card는 linter output을 입력으로 삼으므로 최초 linter pass 전에는 없을 수 있다.
+    # 파일이 생긴 뒤 다시 materialize하면 pointer parity까지 P2 gate로 검산한다.
+    evidence_summary_path = run_dir / "evidence_card" / "evidence_card_summary.json"
+    evidence_manifest_path = run_dir / "evidence_card_package_manifest.json"
+    if evidence_summary_path.exists():
+        paths["evidence_summary_json"] = repo_rel(evidence_summary_path)
+    if evidence_manifest_path.exists():
+        paths["evidence_card_package_manifest"] = repo_rel(evidence_manifest_path)
+    return paths
 
 
 def build_failed_paths(run_dir: Path, version_tag: str) -> dict[str, Any]:
@@ -393,6 +830,170 @@ def lint_manifest_counted(findings: list[Finding], fixture_id: str, path: Path |
                 "artifact_parity",
                 path,
                 f"run_manifest {field} expected {expected_value!r}, got {actual!r}",
+            )
+
+
+def lint_manifest_evidence_alias(
+    findings: list[Finding],
+    fixture_id: str,
+    run_manifest_path: Path | None,
+    evidence_summary_path: Path | None,
+) -> None:
+    if not lint_existing_path(findings, fixture_id, run_manifest_path, "missing_run_manifest"):
+        return
+    if not lint_existing_path(findings, fixture_id, evidence_summary_path, "missing_evidence_summary_json"):
+        return
+    assert run_manifest_path is not None
+    assert evidence_summary_path is not None
+    manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    evidence = json.loads(evidence_summary_path.read_text(encoding="utf-8"))
+    package_total = int(evidence.get("package_total", 0) or 0)
+    all_green_total = int(evidence.get("all_green_total", 0) or 0)
+    expected_all_green = package_total > 0 and package_total == all_green_total
+    packages = evidence.get("packages", []) or []
+    expected_linter_passed = bool(packages) and all(bool(package.get("linter_passed")) for package in packages)
+
+    # Reviewer-facing manifest alias는 evidence card와 linter의 짧은 handoff 표면이라 stale 값이면 count 상태를 오해하게 된다.
+    for field, expected_value in {
+        "artifact_linter_passed": expected_linter_passed,
+        "evidence_card_passed": expected_all_green,
+        "evidence_card_all_green": expected_all_green,
+    }.items():
+        if field not in manifest:
+            add_finding(
+                findings,
+                fixture_id,
+                "P3",
+                "missing_manifest_alias",
+                run_manifest_path,
+                f"run_manifest is missing top-level {field}",
+            )
+            continue
+        if bool(manifest.get(field)) != expected_value:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "evidence_alias_mismatch",
+                run_manifest_path,
+                f"run_manifest {field} expected {expected_value!r} from evidence summary, got {manifest.get(field)!r}",
+            )
+
+
+def canonical_linter_report_dir(run_manifest: dict[str, Any]) -> str:
+    # run manifest의 linter report 파일을 canonical proof로 삼고, evidence 쪽은 같은 디렉토리를 가리켜야 한다.
+    artifact_paths = run_manifest.get("artifact_paths", {})
+    if not isinstance(artifact_paths, dict):
+        return ""
+    linter_report = artifact_paths.get("linter_report")
+    if not isinstance(linter_report, str) or not linter_report:
+        return ""
+    return repo_rel(resolve_repo_path(linter_report).parent)
+
+
+def lint_evidence_linter_pointer_parity(
+    findings: list[Finding],
+    fixture_id: str,
+    run_manifest_path: Path | None,
+    evidence_summary_path: Path | None,
+    evidence_package_manifest_path: Path | None,
+) -> None:
+    if not lint_existing_path(findings, fixture_id, run_manifest_path, "missing_run_manifest"):
+        return
+    assert run_manifest_path is not None
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    expected_dir = canonical_linter_report_dir(run_manifest)
+    if not expected_dir:
+        return
+
+    # evidence card는 reviewer handoff의 표면이라, run manifest와 다른 linter proof를 가리키면 P2로 막는다.
+    for artifact_name, path in [
+        ("evidence_summary_json", evidence_summary_path),
+        ("evidence_card_package_manifest", evidence_package_manifest_path),
+    ]:
+        if path is None:
+            continue
+        if not lint_existing_path(findings, fixture_id, path, f"missing_{artifact_name}"):
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        packages = payload.get("packages", [])
+        if not isinstance(packages, list):
+            continue
+        for index, package in enumerate(packages):
+            if not isinstance(package, dict):
+                continue
+            actual_dir = str(package.get("linter_report_dir", "") or "")
+            if actual_dir and actual_dir != expected_dir:
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "evidence_linter_pointer_parity",
+                    path,
+                    f"{artifact_name} package[{index}].linter_report_dir expected {expected_dir!r}, got {actual_dir!r}",
+                )
+
+
+def lint_manifest_artifact_paths(findings: list[Finding], fixture_id: str, run_manifest_path: Path | None) -> None:
+    if not lint_existing_path(findings, fixture_id, run_manifest_path, "missing_run_manifest"):
+        return
+    assert run_manifest_path is not None
+    payload = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    artifact_paths = payload.get("artifact_paths", {})
+    if not isinstance(artifact_paths, dict):
+        add_finding(findings, fixture_id, "P2", "manifest_artifact_paths", run_manifest_path, "run_manifest artifact_paths must be an object")
+        return
+    for key, value in artifact_paths.items():
+        if isinstance(value, list):
+            values = value
+        else:
+            values = [value]
+        for item in values:
+            if not isinstance(item, str) or not item:
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "manifest_artifact_paths",
+                    run_manifest_path,
+                    f"artifact_paths.{key} must be a non-empty path string",
+                )
+                continue
+            artifact_path = resolve_repo_path(item)
+            if not artifact_path.exists():
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "manifest_artifact_paths",
+                    artifact_path,
+                    f"run_manifest artifact_paths.{key} points to a missing file",
+                )
+
+
+def lint_evidence_package_manifest(findings: list[Finding], fixture_id: str, path: Path | None) -> None:
+    if not lint_existing_path(findings, fixture_id, path, "missing_evidence_card_package_manifest"):
+        return
+    assert path is not None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    packages = payload.get("packages", [])
+    if not isinstance(packages, list) or not packages:
+        add_finding(findings, fixture_id, "P2", "evidence_package_manifest", path, "evidence card package manifest has no packages")
+        return
+    required = {"package_id", "run_name", "version_tag", "package_role", "run_dir", "processed_package_dir", "linter_fixture_id", "linter_report_dir"}
+    for index, package in enumerate(packages):
+        if not isinstance(package, dict):
+            add_finding(findings, fixture_id, "P2", "evidence_package_manifest", path, f"package entry {index} is not an object")
+            continue
+        missing = sorted(required - set(package))
+        if missing:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "evidence_package_manifest",
+                path,
+                f"package entry {index} is missing field(s): {missing}",
             )
 
 
@@ -576,8 +1177,10 @@ def lint_pool_tail_split(findings: list[Finding], fixture_id: str, paths: dict[s
     }
     for field in sorted(required_rejected_fields - set(rejected_fields)):
         add_finding(findings, fixture_id, "P2", "pool_tail_split", rejected_path, f"rejected_pool is missing {field}")
-    for field in sorted(required_tail_fields - set(tail_fields)):
-        add_finding(findings, fixture_id, "P2", "pool_tail_split", tail_path, f"tail_taxonomy is missing {field}")
+    # tail이 0건인 all-green package는 header만 `empty`일 수 있으므로, row가 있을 때만 tail field contract를 강제한다.
+    if tail_rows:
+        for field in sorted(required_tail_fields - set(tail_fields)):
+            add_finding(findings, fixture_id, "P2", "pool_tail_split", tail_path, f"tail_taxonomy is missing {field}")
     for field in sorted(required_quota_fields - set(quota_fields)):
         add_finding(findings, fixture_id, "P2", "pool_tail_split", quota_path, f"quota_surplus_pool is missing {field}")
 
@@ -640,12 +1243,13 @@ def lint_pool_tail_split(findings: list[Finding], fixture_id: str, paths: dict[s
         "pool_class": "quota_surplus",
         "quality_failure": NO,
         "tail_class": "quota_surplus_not_quality_failure",
-        "not_selected_reason": "label_quota_filled",
         "future_candidate_reusable": YES,
-        "candidate_reuse_policy": "reuse_allowed_as_surplus_candidate",
         "promotion_contract_status": "not_promoted_quota_surplus",
     }
-    for row in quota_rows:
+    allowed_not_selected_reasons = {"label_quota_filled", "source_quota_filled"}
+    allowed_reuse_policies = {"reuse_allowed_as_surplus_candidate", "reuse_allowed_as_surplus_candidate_after_dedup"}
+
+    def lint_quota_row(row: dict[str, str], path: Path | None, artifact_name: str) -> None:
         for field, expected_value in quota_expected.items():
             if row.get(field, "") != expected_value:
                 add_finding(
@@ -653,9 +1257,33 @@ def lint_pool_tail_split(findings: list[Finding], fixture_id: str, paths: dict[s
                     fixture_id,
                     "P2",
                     "pool_tail_split",
-                    quota_path,
-                    f"quota_surplus_pool {field} expected {expected_value!r}, got {row.get(field, '')!r}",
+                    path,
+                    f"{artifact_name} {field} expected {expected_value!r}, got {row.get(field, '')!r}",
                 )
+        if row.get("not_selected_reason", "") not in allowed_not_selected_reasons:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "pool_tail_split",
+                path,
+                f"{artifact_name} not_selected_reason expected one of {sorted(allowed_not_selected_reasons)!r}, got {row.get('not_selected_reason', '')!r}",
+            )
+        if row.get("candidate_reuse_policy", "") not in allowed_reuse_policies:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "pool_tail_split",
+                path,
+                f"{artifact_name} candidate_reuse_policy expected one of {sorted(allowed_reuse_policies)!r}, got {row.get('candidate_reuse_policy', '')!r}",
+            )
+
+    for row in quota_rows:
+        lint_quota_row(row, quota_path, "quota_surplus_pool")
+    for row in rejected_rows:
+        if row.get("pool_class") == "quota_surplus":
+            lint_quota_row(row, rejected_path, "rejected_pool quota_surplus row")
 
 
 def lint_candidate_pool_neutral_status(findings: list[Finding], fixture_id: str, paths: dict[str, Any]) -> None:
@@ -694,6 +1322,69 @@ def lint_candidate_pool_neutral_status(findings: list[Finding], fixture_id: str,
                 )
 
 
+def lint_accepted_pool_final_integrity(findings: list[Finding], fixture_id: str, paths: dict[str, Any]) -> None:
+    # accepted_pool에는 final selected와 reusable surplus가 함께 있으므로,
+    # counted 상태는 final_package_selected row에만 허용해야 한다.
+    accepted_path = resolve_repo_path(paths.get("accepted_pool_csv"))
+    final_path = resolve_repo_path(paths.get("final_package_csv"))
+    if not lint_existing_path(findings, fixture_id, accepted_path, "missing_accepted_pool_csv"):
+        return
+    if not lint_existing_path(findings, fixture_id, final_path, "missing_final_package_csv"):
+        return
+    assert accepted_path is not None
+    assert final_path is not None
+    accepted_rows, accepted_fields = read_csv_rows(accepted_path)
+    final_rows, _ = read_csv_rows(final_path)
+    if "pool_class" not in accepted_fields:
+        add_finding(findings, fixture_id, "P2", "accepted_pool_final_integrity", accepted_path, "accepted_pool is missing pool_class")
+        return
+    counted_rows = [
+        row
+        for row in accepted_rows
+        if row.get("count_reflection_status") == COUNTED_REFLECTION_STATUS or row.get("count_allowed") == YES
+    ]
+    final_selected_rows = [row for row in accepted_rows if row.get("pool_class") == "final_package_selected"]
+    if len(counted_rows) != len(final_rows):
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "accepted_pool_final_integrity",
+            accepted_path,
+            f"accepted_pool counted rows expected final package row count {len(final_rows)}, got {len(counted_rows)}",
+        )
+    if len(final_selected_rows) != len(final_rows):
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "accepted_pool_final_integrity",
+            accepted_path,
+            f"accepted_pool final_package_selected rows expected final package row count {len(final_rows)}, got {len(final_selected_rows)}",
+        )
+    leaked = [row.get("candidate_id", "") for row in counted_rows if row.get("pool_class") != "final_package_selected"]
+    if leaked:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "accepted_pool_final_integrity",
+            accepted_path,
+            f"accepted_pool non-final rows are counted: {leaked[:5]!r}",
+        )
+    final_ids = {row.get("candidate_id", "") for row in final_rows}
+    counted_ids = {row.get("candidate_id", "") for row in counted_rows}
+    if final_ids != counted_ids:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "accepted_pool_final_integrity",
+            accepted_path,
+            "accepted_pool counted candidate_id set does not match final_package candidate_id set",
+        )
+
+
 def lint_jsonl_counted(findings: list[Finding], fixture_id: str, path: Path) -> None:
     if not lint_existing_path(findings, fixture_id, path, "missing_split_jsonl"):
         return
@@ -720,6 +1411,322 @@ def lint_jsonl_counted(findings: list[Finding], fixture_id: str, path: Path) -> 
                 path,
                 f"split JSONL {field} expected {expected_value!r}, got {bad_values[:5]!r}",
             )
+
+
+def lint_descriptive_csv_counted(findings: list[Finding], fixture_id: str, path: Path | None, artifact_name: str) -> None:
+    if not lint_existing_path(findings, fixture_id, path, f"missing_{artifact_name}"):
+        return
+    assert path is not None
+    rows, fieldnames = read_csv_rows(path)
+    if not rows:
+        add_finding(findings, fixture_id, "P2", "empty_artifact", path, f"{artifact_name} has no rows")
+        return
+    required = {
+        "package_role": COUNTED_BATCH_STATUS,
+        "batch_status": COUNTED_BATCH_STATUS,
+        "count_reflection_status": COUNTED_REFLECTION_STATUS,
+        "downstream_consumption_allowed": YES,
+        "count_allowed": YES,
+        "count_disposition": "counted",
+        "train_eligible": YES,
+        "audit_required": NO,
+    }
+    allowed_values = {
+        # 예전 package는 reviewer sign-off 뒤 counted, 최신 API-first package는 strict final success 즉시 counted다.
+        "promotion_contract_status": {
+            "counted_after_reviewer_signoff",
+            "counted_under_api_first_contract",
+        }
+    }
+    if "promotion_contract_status" not in fieldnames:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "missing_contract_field",
+            path,
+            f"{artifact_name} is missing promotion_contract_status",
+        )
+    else:
+        bad_promotion_values = sorted(
+            {row.get("promotion_contract_status", "") for row in rows if row.get("promotion_contract_status", "") not in allowed_values["promotion_contract_status"]}
+        )
+        if bad_promotion_values:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "bad_contract_value",
+                path,
+                f"{artifact_name} has promotion_contract_status values {bad_promotion_values}",
+            )
+    for field, expected_value in required.items():
+        if field not in fieldnames:
+            add_finding(findings, fixture_id, "P2", "missing_contract_field", path, f"{artifact_name} is missing {field}")
+            continue
+        bad_values = sorted({row.get(field, "") for row in rows if row.get(field, "") != expected_value})
+        if bad_values:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "descriptive_artifact_parity",
+                path,
+                f"{artifact_name} {field} expected {expected_value!r}, got {bad_values[:5]!r}",
+            )
+    if "final_status" in fieldnames:
+        bad_status = sorted({row.get("final_status", "") for row in rows if row.get("final_status", "") != "pass"})
+        if bad_status:
+            add_finding(findings, fixture_id, "P2", "descriptive_quality_gate", path, f"{artifact_name} final_status got {bad_status[:5]!r}")
+
+
+def lint_descriptive_merged_counted(findings: list[Finding], fixture_id: str, path: Path | None) -> None:
+    if not lint_existing_path(findings, fixture_id, path, "missing_merged_csv"):
+        return
+    assert path is not None
+    rows, fieldnames = read_csv_rows(path)
+    if not rows:
+        add_finding(findings, fixture_id, "P2", "empty_artifact", path, "merged_csv has no rows")
+        return
+    selected_rows = [row for row in rows if row.get("final_package_selected") == YES]
+    if not selected_rows:
+        add_finding(findings, fixture_id, "P2", "descriptive_final_selection_missing", path, "merged_csv has no final_package_selected rows")
+        return
+    # merged에는 rejected candidate도 함께 남기되, counted 상태는 final selected rows에만 허용한다.
+    for row in selected_rows:
+        for field, expected_value in {
+            "batch_status": COUNTED_BATCH_STATUS,
+            "count_reflection_status": COUNTED_REFLECTION_STATUS,
+            "downstream_consumption_allowed": YES,
+            "count_allowed": YES,
+            "count_disposition": "counted",
+            "final_status": "pass",
+            "audit_required": NO,
+            "train_eligible": YES,
+        }.items():
+            if row.get(field, "") != expected_value:
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "descriptive_merged_selected_parity",
+                    path,
+                    f"selected merged row {row.get('candidate_id', '')} {field} expected {expected_value!r}, got {row.get(field, '')!r}",
+                )
+    leaked = [
+        row.get("candidate_id", "")
+        for row in rows
+        if row.get("final_package_selected") != YES and row.get("count_allowed") == YES
+    ]
+    if leaked:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "descriptive_nonfinal_count_leak",
+            path,
+            f"non-final merged rows have count_allowed = 예: {leaked[:5]!r}",
+        )
+
+
+def lint_descriptive_split_lock_reuse(findings: list[Finding], fixture_id: str, paths: dict[str, Any]) -> None:
+    # Tier 2 cross-task reuse는 train split에만 허용된다. final/processed artifact에 metadata가 빠져도 seed_registry와 조인해 평가 split 누수를 잡는다.
+    seed_path = resolve_repo_path(paths.get("seed_registry_csv"))
+    final_path = resolve_repo_path(paths.get("final_package_csv"))
+    processed_path = resolve_repo_path(paths.get("processed_manifest"))
+    if not lint_existing_path(findings, fixture_id, seed_path, "missing_seed_registry_csv"):
+        return
+    assert seed_path is not None
+    seed_rows, _ = read_csv_rows(seed_path)
+    seed_meta_by_id = {row.get("seed_sample_id", ""): row for row in seed_rows}
+    check_targets = [
+        ("final_package_csv", final_path, "candidate_id"),
+        ("processed_manifest", processed_path, "problem_id"),
+    ]
+    for artifact_name, artifact_path, id_field in check_targets:
+        if not lint_existing_path(findings, fixture_id, artifact_path, f"missing_{artifact_name}_for_split_lock"):
+            continue
+        assert artifact_path is not None
+        rows, fieldnames = read_csv_rows(artifact_path)
+        for row in rows:
+            seed_id = row.get("seed_sample_id", "")
+            seed_meta = seed_meta_by_id.get(seed_id, {})
+            reuse_tier = row.get("reuse_tier") or seed_meta.get("reuse_tier", "")
+            source_split = row.get("source_split") or seed_meta.get("source_split", "")
+            locked_split = row.get("locked_split") or seed_meta.get("locked_split", "")
+            final_split = row.get("split") or row.get("dataset_disposition", "")
+            if reuse_tier.startswith("Tier 2"):
+                if source_split != "train" or locked_split != "train" or final_split != "train":
+                    add_finding(
+                        findings,
+                        fixture_id,
+                        "P2",
+                        "descriptive_split_lock_eval_leakage",
+                        artifact_path,
+                        (
+                            f"{artifact_name} {row.get(id_field, seed_id)} Tier 2 row must remain train-only; "
+                            f"source_split={source_split!r}, locked_split={locked_split!r}, split={final_split!r}"
+                        ),
+                    )
+            elif final_split in {"dev", "test"} and reuse_tier and not reuse_tier.startswith("Tier 0"):
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "descriptive_eval_reuse_policy",
+                    artifact_path,
+                    f"{artifact_name} {row.get(id_field, seed_id)} eval row must be Tier 0 fresh-only; got {reuse_tier!r}",
+                )
+
+
+def lint_descriptive_compiler_manifest_counted(findings: list[Finding], fixture_id: str, paths: dict[str, Any]) -> None:
+    # compiler_manifest는 package factory의 최상위 audit trail이라 run/processed manifest가 counted여도 따로 parity를 본다.
+    compiler_path = resolve_repo_path(paths.get("compiler_manifest_json"))
+    if not lint_existing_path(findings, fixture_id, compiler_path, "missing_compiler_manifest_json"):
+        return
+    assert compiler_path is not None
+    payload = json.loads(compiler_path.read_text(encoding="utf-8"))
+
+    role = str(payload.get("package_role", ""))
+    if role not in {"counted_current_production", "counted_current_production_package"}:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "compiler_manifest_counted_parity",
+            compiler_path,
+            f"compiler_manifest package_role expected counted role, got {role!r}",
+        )
+    for field, expected_value in {
+        "count_reflection_status": COUNTED_REFLECTION_STATUS,
+        "count_allowed": YES,
+    }.items():
+        actual = str(payload.get(field, ""))
+        if actual != expected_value:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "compiler_manifest_counted_parity",
+                compiler_path,
+                f"compiler_manifest {field} expected {expected_value!r}, got {actual!r}",
+            )
+
+    final_path = resolve_repo_path(paths.get("final_package_csv"))
+    candidate_path = resolve_repo_path(paths.get("candidate_pool_csv"))
+    accepted_path = resolve_repo_path(paths.get("accepted_pool_csv"))
+    tail_path = resolve_repo_path(paths.get("tail_taxonomy_csv"))
+    quota_path = resolve_repo_path(paths.get("quota_surplus_csv"))
+    row_expectations = {
+        "candidate_total": candidate_path,
+        "accepted_total": accepted_path,
+        "final_package_total": final_path,
+        "quality_tail_total": tail_path,
+        "quota_surplus_total": quota_path,
+    }
+    row_counts = payload.get("row_counts", {})
+    if not isinstance(row_counts, dict):
+        add_finding(findings, fixture_id, "P2", "compiler_manifest_counted_parity", compiler_path, "compiler_manifest row_counts must be an object")
+        return
+    for field, artifact_path in row_expectations.items():
+        if not lint_existing_path(findings, fixture_id, artifact_path, f"missing_{field}_artifact"):
+            continue
+        assert artifact_path is not None
+        artifact_rows, _ = read_csv_rows(artifact_path)
+        try:
+            expected_count = int(row_counts.get(field))
+        except (TypeError, ValueError):
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "compiler_manifest_counted_parity",
+                compiler_path,
+                f"compiler_manifest row_counts.{field} is not an integer",
+            )
+            continue
+        if expected_count != len(artifact_rows):
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "compiler_manifest_counted_parity",
+                artifact_path,
+                f"compiler_manifest row_counts.{field} expected {expected_count}, got artifact rows {len(artifact_rows)}",
+            )
+
+    success_result = payload.get("success_result")
+    if isinstance(success_result, dict) and success_result.get("passed") is not True:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "compiler_manifest_counted_parity",
+            compiler_path,
+            "compiler_manifest success_result.passed must be true for counted descriptive package",
+        )
+
+
+def lint_descriptive_handoff_alias_parity(findings: list[Finding], fixture_id: str, paths: dict[str, Any]) -> None:
+    # API-first handoff에서는 run/compiler manifest의 짧은 alias가 cost audit과 reviewer handoff의 표면이다.
+    # 값이 빠지면 strict final package는 맞아도 다음 seed planning이나 비용 검산에서 상태를 오해할 수 있다.
+    run_path = resolve_repo_path(paths.get("run_manifest"))
+    compiler_path = resolve_repo_path(paths.get("compiler_manifest_json"))
+    if not lint_existing_path(findings, fixture_id, run_path, "missing_run_manifest_for_handoff_alias"):
+        return
+    if not lint_existing_path(findings, fixture_id, compiler_path, "missing_compiler_manifest_for_handoff_alias"):
+        return
+    assert run_path is not None
+    assert compiler_path is not None
+
+    run_payload = json.loads(run_path.read_text(encoding="utf-8"))
+    compiler_payload = json.loads(compiler_path.read_text(encoding="utf-8"))
+    run_api_summary = run_payload.get("api_call_summary")
+    if not isinstance(run_api_summary, dict):
+        add_finding(findings, fixture_id, "P2", "descriptive_handoff_alias_parity", run_path, "run_manifest api_call_summary must be an object")
+        return
+    expected_total = run_api_summary.get("total_api_calls")
+    for payload, path, manifest_name in [
+        (run_payload, run_path, "run_manifest"),
+        (compiler_payload, compiler_path, "compiler_manifest"),
+    ]:
+        if payload.get("total_api_calls") != expected_total:
+            add_finding(
+                findings,
+                fixture_id,
+                "P2",
+                "descriptive_handoff_alias_parity",
+                path,
+                f"{manifest_name} total_api_calls expected {expected_total!r}, got {payload.get('total_api_calls')!r}",
+            )
+        for field, expected_value in {
+            "split_lock_eval_hotfix_status": "passed",
+            "artifact_linter_passed": True,
+            "evidence_card_passed": True,
+            "evidence_card_all_green": True,
+            "count_reflection_requires_reviewer_signoff": False,
+            "downstream_consumption_allowed": YES,
+        }.items():
+            if payload.get(field) != expected_value:
+                add_finding(
+                    findings,
+                    fixture_id,
+                    "P2",
+                    "descriptive_handoff_alias_parity",
+                    path,
+                    f"{manifest_name} {field} expected {expected_value!r}, got {payload.get(field)!r}",
+                )
+
+    compiler_api_summary = compiler_payload.get("api_call_summary")
+    if compiler_api_summary != run_api_summary:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "descriptive_handoff_alias_parity",
+            compiler_path,
+            "compiler_manifest api_call_summary must match run_manifest api_call_summary",
+        )
 
 
 def lint_jsonl_candidate(findings: list[Finding], fixture_id: str, path: Path) -> None:
@@ -858,12 +1865,65 @@ def lint_validator_wiring_check_md(
         )
 
 
+def lint_seed_preflight_md(
+    findings: list[Finding],
+    fixture_id: str,
+    path: Path | None,
+    expectations: dict[str, Any] | None = None,
+) -> None:
+    if not lint_existing_path(findings, fixture_id, path, "missing_seed_preflight_md"):
+        return
+    assert path is not None
+    expectations = expectations or {}
+    text = path.read_text(encoding="utf-8")
+    # Seed preflight markdown은 reviewer가 API 실행 규모를 판단하는 표면이라 이전 package 규모 문구를 강하게 차단한다.
+    stale_phrases = expectations.get("stale_phrases", [])
+    hits = [phrase for phrase in stale_phrases if phrase in text]
+    if hits:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "seed_preflight_stale_scope",
+            path,
+            f"seed_preflight_md contains stale scope phrase(s): {hits}",
+        )
+    required_phrases = expectations.get("required_phrases", [])
+    missing = [phrase for phrase in required_phrases if phrase not in text]
+    if missing:
+        add_finding(
+            findings,
+            fixture_id,
+            "P2",
+            "seed_preflight_scope_missing",
+            path,
+            f"seed_preflight_md is missing scope phrase(s): {missing}",
+        )
+
+
 def lint_counted_final_package(fixture: dict[str, Any]) -> list[Finding]:
     fixture_id = fixture["fixture_id"]
     paths = fixture.get("paths", {})
     findings: list[Finding] = []
 
     lint_manifest_counted(findings, fixture_id, resolve_repo_path(paths.get("run_manifest")))
+    lint_manifest_artifact_paths(findings, fixture_id, resolve_repo_path(paths.get("run_manifest")))
+    if paths.get("evidence_summary_json") is not None:
+        lint_manifest_evidence_alias(
+            findings,
+            fixture_id,
+            resolve_repo_path(paths.get("run_manifest")),
+            resolve_repo_path(paths.get("evidence_summary_json")),
+        )
+    if paths.get("evidence_card_package_manifest") is not None:
+        lint_evidence_package_manifest(findings, fixture_id, resolve_repo_path(paths.get("evidence_card_package_manifest")))
+    lint_evidence_linter_pointer_parity(
+        findings,
+        fixture_id,
+        resolve_repo_path(paths.get("run_manifest")),
+        resolve_repo_path(paths.get("evidence_summary_json")),
+        resolve_repo_path(paths.get("evidence_card_package_manifest")),
+    )
     for key, artifact_name in [
         ("processed_manifest", "processed_manifest"),
         ("final_package_csv", "final_package_csv"),
@@ -900,8 +1960,17 @@ def lint_counted_final_package(fixture: dict[str, Any]) -> list[Finding]:
             resolve_repo_path(paths.get("validator_wiring_check_md")),
             fixture.get("validator_wiring_expectations"),
         )
+    if paths.get("seed_preflight_md") is not None:
+        lint_seed_preflight_md(
+            findings,
+            fixture_id,
+            resolve_repo_path(paths.get("seed_preflight_md")),
+            fixture.get("seed_preflight_expectations"),
+        )
     if any(paths.get(key) is not None for key in ["rejected_pool_csv", "tail_taxonomy_csv", "quota_surplus_csv"]):
         lint_pool_tail_split(findings, fixture_id, paths)
+    if paths.get("accepted_pool_csv") is not None:
+        lint_accepted_pool_final_integrity(findings, fixture_id, paths)
     if paths.get("candidate_pool_csv") is not None:
         lint_candidate_pool_neutral_status(findings, fixture_id, paths)
     return findings
@@ -913,6 +1982,7 @@ def lint_count_reflection_candidate_package(fixture: dict[str, Any]) -> list[Fin
     findings: list[Finding] = []
 
     lint_manifest_candidate(findings, fixture_id, resolve_repo_path(paths.get("run_manifest")))
+    lint_manifest_artifact_paths(findings, fixture_id, resolve_repo_path(paths.get("run_manifest")))
     for key, artifact_name in [
         ("processed_manifest", "processed_manifest"),
         ("final_package_csv", "final_package_csv"),
@@ -947,6 +2017,53 @@ def lint_count_reflection_candidate_package(fixture: dict[str, Any]) -> list[Fin
         fixture.get("validator_wiring_expectations"),
     )
     lint_pool_tail_split(findings, fixture_id, paths)
+    if paths.get("accepted_pool_csv") is not None:
+        lint_accepted_pool_final_integrity(findings, fixture_id, paths)
+    if paths.get("candidate_pool_csv") is not None:
+        lint_candidate_pool_neutral_status(findings, fixture_id, paths)
+    return findings
+
+
+def lint_descriptive_counted_final_package(fixture: dict[str, Any]) -> list[Finding]:
+    fixture_id = fixture["fixture_id"]
+    paths = fixture.get("paths", {})
+    findings: list[Finding] = []
+    lint_manifest_counted(findings, fixture_id, resolve_repo_path(paths.get("run_manifest")))
+    lint_manifest_artifact_paths(findings, fixture_id, resolve_repo_path(paths.get("run_manifest")))
+    if paths.get("evidence_summary_json") is not None:
+        lint_manifest_evidence_alias(
+            findings,
+            fixture_id,
+            resolve_repo_path(paths.get("run_manifest")),
+            resolve_repo_path(paths.get("evidence_summary_json")),
+        )
+    if paths.get("evidence_card_package_manifest") is not None:
+        lint_evidence_package_manifest(findings, fixture_id, resolve_repo_path(paths.get("evidence_card_package_manifest")))
+    for key, artifact_name in [
+        ("processed_manifest", "processed_manifest"),
+        ("final_package_csv", "final_package_csv"),
+    ]:
+        lint_descriptive_csv_counted(findings, fixture_id, resolve_repo_path(paths.get(key)), artifact_name)
+    lint_descriptive_merged_counted(findings, fixture_id, resolve_repo_path(paths.get("merged_csv")))
+    lint_descriptive_split_lock_reuse(findings, fixture_id, paths)
+    if paths.get("compiler_manifest_json") is not None:
+        lint_descriptive_compiler_manifest_counted(findings, fixture_id, paths)
+        lint_descriptive_handoff_alias_parity(findings, fixture_id, paths)
+    for split_path_text in paths.get("split_jsonl", []) or []:
+        path = resolve_repo_path(split_path_text)
+        if path is not None:
+            lint_jsonl_counted(findings, fixture_id, path)
+    if paths.get("seed_preflight_md") is not None:
+        lint_seed_preflight_md(
+            findings,
+            fixture_id,
+            resolve_repo_path(paths.get("seed_preflight_md")),
+            fixture.get("seed_preflight_expectations"),
+        )
+    if any(paths.get(key) is not None for key in ["rejected_pool_csv", "tail_taxonomy_csv", "quota_surplus_csv"]):
+        lint_pool_tail_split(findings, fixture_id, paths)
+    if paths.get("accepted_pool_csv") is not None:
+        lint_accepted_pool_final_integrity(findings, fixture_id, paths)
     if paths.get("candidate_pool_csv") is not None:
         lint_candidate_pool_neutral_status(findings, fixture_id, paths)
     return findings
@@ -1006,6 +2123,8 @@ def lint_fixture(fixture: dict[str, Any]) -> tuple[list[Finding], FixtureOutcome
         findings = lint_counted_final_package(fixture)
     elif role == "count_reflection_candidate_package":
         findings = lint_count_reflection_candidate_package(fixture)
+    elif role == "descriptive_counted_final_package":
+        findings = lint_descriptive_counted_final_package(fixture)
     elif role == "pre_execution_snapshot":
         findings = lint_snapshot_fixture(fixture)
     elif role == "failed_package_not_counted_normal":
@@ -1098,6 +2217,10 @@ def render_markdown_report(
     total = len(outcomes_by_fixture)
     passed = sum(1 for outcome in outcomes_by_fixture.values() if outcome.fixture_passed)
     failed = total - passed
+    unexpected_blocking_count_total = sum(outcome.unexpected_blocking_count for outcome in outcomes_by_fixture.values())
+    blocking_finding_count_including_expected = sum(
+        1 for findings in findings_by_fixture.values() for finding in findings if finding.severity in {"P1", "P2"}
+    )
     lines = [
         "# artifact linter minimal dry-run report",
         "",
@@ -1106,6 +2229,8 @@ def render_markdown_report(
         f"- fixture_total: `{total}`",
         f"- fixture_passed: `{passed}`",
         f"- fixture_failed: `{failed}`",
+        f"- unexpected_blocking_count_total: `{unexpected_blocking_count_total}`",
+        f"- blocking_finding_count_including_expected_failures: `{blocking_finding_count_including_expected}`",
         "",
         "## fixture summary",
         "",
@@ -1230,12 +2355,15 @@ def run_linter(manifest_path: Path, output_dir: Path) -> bool:
             "fixture_total": len(outcomes_by_fixture),
             "fixture_passed": sum(1 for outcome in outcomes_by_fixture.values() if outcome.fixture_passed),
             "fixture_failed": sum(1 for outcome in outcomes_by_fixture.values() if not outcome.fixture_passed),
+            # Reviewer-facing summary는 expected-fail fixture의 P2보다 unexpected blocker를 먼저 보게 한다.
+            "unexpected_blocking_count_total": unexpected_blocking_count_total,
             "blocking_finding_count": sum(
                 1 for findings in findings_by_fixture.values() for finding in findings if finding.severity in {"P1", "P2"}
             ),
             "p3_finding_count": sum(1 for findings in findings_by_fixture.values() for finding in findings if finding.severity == "P3"),
-            # Expected-fail fixtures may intentionally carry P1/P2 findings, so this alias exposes only unexpected blockers.
-            "unexpected_blocking_count_total": unexpected_blocking_count_total,
+            "blocking_finding_count_including_expected_failures": sum(
+                1 for findings in findings_by_fixture.values() for finding in findings if finding.severity in {"P1", "P2"}
+            ),
             "passed": all(outcome.fixture_passed for outcome in outcomes_by_fixture.values()),
             "fixtures": fixture_summary,
         },

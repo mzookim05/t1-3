@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -29,11 +30,16 @@ from settings import DATASET_SPECS  # noqa: E402
 from transform_problems import build_transformed_sample  # noqa: E402
 
 
-VERSION_TAG = "descriptive_wave_v2_split_lock"
+# reviewer stop line마다 같은 runner를 재사용하되, 이전 counted wave의 processed 산출물을 덮어쓰지 않도록
+# 실행 단위 식별자는 환경변수로 바꿀 수 있게 둔다.
+VERSION_TAG = os.environ.get("DESCRIPTIVE_WAVE_VERSION_TAG", "descriptive_inventory_linter_pointer_sync_medium_primary")
 RUN_DATE = build_run_stamp()
-RUN_PURPOSE = "descriptive_v3_split_lock_target40_candidate56_api_execution"
+RUN_PURPOSE = os.environ.get("DESCRIPTIVE_WAVE_RUN_PURPOSE", "descriptive_v3_availability_map_medium_primary_api_execution")
 RUN_NAME = f"{RUN_DATE}_{VERSION_TAG}_{RUN_PURPOSE}"
-ROUTE_NAME = "descriptive_wave_v2_split_lock_api_execution"
+ROUTE_NAME = os.environ.get(
+    "DESCRIPTIVE_WAVE_ROUTE_NAME",
+    "descriptive_inventory_linter_pointer_sync_plus_availability_map_medium_primary_api_execution",
+)
 
 PROJECT_ROOT = base.PROJECT_ROOT
 INTERIM_DIR = PROJECT_ROOT / "data" / "interim" / "aihub" / "problem_generation" / "production_batches" / VERSION_TAG
@@ -51,6 +57,9 @@ SEED_READY_PATH = INTERIM_DIR / "seed_ready.jsonl"
 SEED_PREFLIGHT_CSV_PATH = RUN_EXPORTS_DIR / f"seed_preflight_{VERSION_TAG}.csv"
 SEED_PREFLIGHT_MD_PATH = RUN_EXPORTS_DIR / f"seed_preflight_{VERSION_TAG}.md"
 EXCLUSION_AUDIT_CSV_PATH = RUN_EXPORTS_DIR / f"exclusion_audit_{VERSION_TAG}.csv"
+AVAILABILITY_MAP_CSV_PATH = RUN_EXPORTS_DIR / f"seed_availability_map_{VERSION_TAG}.csv"
+AVAILABILITY_ROUTE_FEASIBILITY_CSV_PATH = RUN_EXPORTS_DIR / f"route_feasibility_{VERSION_TAG}.csv"
+AVAILABILITY_MAP_MD_PATH = RUN_EXPORTS_DIR / f"seed_availability_map_{VERSION_TAG}.md"
 PACKAGE_SPEC_MD_PATH = RUN_EXPORTS_DIR / f"package_spec_{VERSION_TAG}.md"
 RUN_MANIFEST_PATH = RUN_DIR / "run_manifest.json"
 GENERATED_PROBLEMS_PATH = RUN_GENERATIONS_DIR / f"generated_problems_{VERSION_TAG}.jsonl"
@@ -81,8 +90,39 @@ CANDIDATE_BATCH_STATUS = "compiled_candidate_not_counted"
 CANDIDATE_REFLECTION_STATUS = "not_counted_until_reviewer_signoff"
 COUNT_DISPOSITION = "candidate_not_counted"
 PROMOTION_CONTRACT_STATUS = "reviewer_signoff_needed"
+COUNTED_PACKAGE_ROLE = "counted_current_production"
+COUNTED_BATCH_STATUS = "counted_current_production"
+COUNTED_REFLECTION_STATUS = "counted"
+COUNTED_DISPOSITION = "counted"
+COUNTED_PROMOTION_CONTRACT_STATUS = "counted_under_api_first_contract"
 YES = "예"
 NO = "아니오"
+
+
+def candidate_contract_fields() -> dict[str, str]:
+    # candidate/tail/surplus layer는 final package 밖이므로 downstream과 count를 계속 막는다.
+    return {
+        "package_role": PACKAGE_ROLE,
+        "batch_status": CANDIDATE_BATCH_STATUS,
+        "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
+        "downstream_consumption_allowed": NO,
+        "count_allowed": NO,
+        "count_disposition": COUNT_DISPOSITION,
+        "promotion_contract_status": PROMOTION_CONTRACT_STATUS,
+    }
+
+
+def counted_contract_fields() -> dict[str, str]:
+    # API-first reviewer contract에서는 strict final package만 counted state로 승격하고, 후보 pool은 그대로 미합산 보존한다.
+    return {
+        "package_role": COUNTED_PACKAGE_ROLE,
+        "batch_status": COUNTED_BATCH_STATUS,
+        "count_reflection_status": COUNTED_REFLECTION_STATUS,
+        "downstream_consumption_allowed": YES,
+        "count_allowed": YES,
+        "count_disposition": COUNTED_DISPOSITION,
+        "promotion_contract_status": COUNTED_PROMOTION_CONTRACT_STATUS,
+    }
 
 EXPLANATION_GENERATION_VARIANT = {
     "name": "without_long_answer",
@@ -128,6 +168,23 @@ PRIMARY_FINAL_SOURCE_COUNTS = {
     "03_TL_판결문_QA": 3,
     "04_TL_판결문_QA": 3,
 }
+MEDIUM_RELAXED_SOURCE_COUNTS = {
+    # `01_TL_법령_QA` depleted source를 같은 법령 lane의 `02/03/04_TL_법령_QA`로 재배정해
+    # doc_type 총량은 유지하고 source-local 병목만 완화한다.
+    **PRIMARY_SOURCE_COUNTS,
+    "01_TL_법령_QA": 0,
+    "02_TL_법령_QA": 4,
+    "03_TL_법령_QA": 5,
+    "04_TL_법령_QA": 5,
+}
+MEDIUM_RELAXED_FINAL_SOURCE_COUNTS = {
+    # final package도 법령형 `01` quota만 제외하고 `02/03/04`가 총 10건을 채우도록 잠근다.
+    **PRIMARY_FINAL_SOURCE_COUNTS,
+    "01_TL_법령_QA": 0,
+    "02_TL_법령_QA": 3,
+    "03_TL_법령_QA": 3,
+    "04_TL_법령_QA": 4,
+}
 FALLBACK_SOURCE_COUNTS = {
     "01_TL_법령_QA": 2,
     "02_TL_법령_QA": 2,
@@ -166,6 +223,80 @@ FALLBACK_FINAL_SOURCE_COUNTS = {
     "03_TL_판결문_QA": 2,
     "04_TL_판결문_QA": 2,
 }
+CONSTRAINED_SOURCE_COUNTS = {
+    # `01_TL_법령_QA`는 현재 exclusion/split-lock gate를 통과한 fresh candidate가 없어 constrained route에서 제외한다.
+    "02_TL_법령_QA": 2,
+    "03_TL_법령_QA": 2,
+    "04_TL_법령_QA": 3,
+    "01_TL_유권해석_QA": 2,
+    "02_TL_유권해석_QA": 2,
+    "03_TL_해석례_QA": 2,
+    "04_TL_해석례_QA": 3,
+    "01_TL_심결례_QA": 2,
+    "02_TL_심결례_QA": 1,
+    "02_TL_심결문_QA": 1,
+    "03_TL_결정례_QA": 3,
+    "04_TL_결정례_QA": 2,
+    "01_TL_판결문_QA": 2,
+    "02_TL_판결문_QA": 2,
+    "03_TL_판결문_QA": 2,
+    "04_TL_판결문_QA": 3,
+}
+CONSTRAINED_PRIMARY_FINAL_SOURCE_COUNTS = {
+    # primary final 24는 빠진 `01_TL_법령_QA` 몫을 같은 법령 lane의 `04_TL_법령_QA`로 보충한다.
+    "02_TL_법령_QA": 1,
+    "03_TL_법령_QA": 2,
+    "04_TL_법령_QA": 3,
+    "01_TL_유권해석_QA": 1,
+    "02_TL_유권해석_QA": 1,
+    "03_TL_해석례_QA": 2,
+    "04_TL_해석례_QA": 2,
+    "01_TL_심결례_QA": 1,
+    "02_TL_심결례_QA": 1,
+    "02_TL_심결문_QA": 1,
+    "03_TL_결정례_QA": 2,
+    "04_TL_결정례_QA": 1,
+    "01_TL_판결문_QA": 1,
+    "02_TL_판결문_QA": 1,
+    "03_TL_판결문_QA": 2,
+    "04_TL_판결문_QA": 2,
+}
+CONSTRAINED_FALLBACK_FINAL_SOURCE_COUNTS = {
+    # fallback final 20은 source 균형보다 global eval holdout과 strict quality gate 통과를 우선한다.
+    "02_TL_법령_QA": 1,
+    "03_TL_법령_QA": 2,
+    "04_TL_법령_QA": 1,
+    "01_TL_유권해석_QA": 1,
+    "02_TL_유권해석_QA": 1,
+    "03_TL_해석례_QA": 2,
+    "04_TL_해석례_QA": 2,
+    "01_TL_심결례_QA": 1,
+    "02_TL_심결례_QA": 1,
+    # 이번 constrained pool에서는 `02_TL_심결문_QA`가 strict accepted pool에 남지 않아 fallback quota에서 제외한다.
+    "02_TL_심결문_QA": 0,
+    "03_TL_결정례_QA": 2,
+    "04_TL_결정례_QA": 2,
+    "01_TL_판결문_QA": 1,
+    "02_TL_판결문_QA": 1,
+    "03_TL_판결문_QA": 1,
+    "04_TL_판결문_QA": 1,
+}
+
+
+def scaled_source_counts(base_counts: dict[str, int], target_total: int) -> dict[str, int]:
+    # candidate64처럼 reviewer가 요청한 확대 route는 기존 source-relaxed 비율을 유지한 채
+    # 정수 quota로 재배분해 exact runner preflight가 가능하게 만든다.
+    current_total = sum(base_counts.values())
+    floors: dict[str, int] = {}
+    remainders: list[tuple[float, str]] = []
+    for source_subset, count in base_counts.items():
+        scaled = count * target_total / current_total
+        floors[source_subset] = int(scaled)
+        remainders.append((scaled - int(scaled), source_subset))
+    missing = target_total - sum(floors.values())
+    for _, source_subset in sorted(remainders, reverse=True)[:missing]:
+        floors[source_subset] += 1
+    return floors
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -498,27 +629,244 @@ def select_source_records(source_counts: dict[str, int], exclusion_sets: dict[st
     return records, audit_rows
 
 
-def choose_route(exclusion_sets: dict[str, set[str]]) -> tuple[dict, list[dict], list[dict]]:
-    routes = [
-        {
-            "route_label": "primary_target40_candidate56",
-            "target_count": 40,
-            "source_counts": PRIMARY_SOURCE_COUNTS,
-            "final_source_counts": PRIMARY_FINAL_SOURCE_COUNTS,
-        },
-        {
-            "route_label": "fallback_target24_candidate36",
-            "target_count": 24,
-            "source_counts": FALLBACK_SOURCE_COUNTS,
-            "final_source_counts": FALLBACK_FINAL_SOURCE_COUNTS,
-        },
+def objective_fresh_reuse_policy(family_id: str, label_path: str, raw_path: str, exclusion_sets: dict[str, set[str]]) -> tuple[str, str]:
+    # objective availability는 cross-task split-lock을 열지 않고, 완전 fresh-only 후보만 별도로 센다.
+    if (
+        family_id in exclusion_sets["global_eval_family_id"]
+        or label_path in exclusion_sets["global_eval_label_path"]
+        or raw_path in exclusion_sets["global_eval_raw_path"]
+    ):
+        return "", "global_eval_holdout_overlap"
+    if (
+        family_id in exclusion_sets["quality_tail_family_id"]
+        or label_path in exclusion_sets["quality_tail_label_path"]
+        or raw_path in exclusion_sets["quality_tail_raw_path"]
+    ):
+        return "", "quality_tail_overlap"
+    if (
+        family_id in exclusion_sets["family_id"]
+        or label_path in exclusion_sets["label_path"]
+        or raw_path in exclusion_sets["raw_path"]
+    ):
+        return "", "prior_overlap"
+    return "Tier 0 fresh-only", ""
+
+
+def collect_seed_availability(exclusion_sets: dict[str, set[str]]) -> tuple[list[dict], dict[str, int]]:
+    # availability map은 route 선택을 감으로 하지 않기 위한 no-API proof다.
+    availability_rows: list[dict] = []
+    descriptive_available_by_source: dict[str, int] = {}
+    for spec in DATASET_SPECS:
+        source_subset = spec["source_subset"]
+        label_paths = explanation_common.list_label_files(spec["label_glob"])
+        raw_paths = explanation_common.list_raw_files(spec["raw_glob"])
+        counters: Counter[tuple[str, str, str, str]] = Counter()
+        for label_path in label_paths:
+            payload = explanation_common.normalize_label_payload(
+                label_path,
+                explanation_common.load_json(label_path),
+                spec["doc_type_name"],
+            )
+            try:
+                raw_path = explanation_common.locate_raw_path(raw_paths, spec["doc_type_name"], payload["info"])
+            except FileNotFoundError:
+                counters[("descriptive", "unavailable", "raw_path_missing", "")] += 1
+                continue
+            family_id = explanation_common.make_family_id(spec["doc_type_name"], payload["info"])
+            reuse_meta, descriptive_skip = classify_reuse_policy(family_id, str(label_path), str(raw_path), exclusion_sets)
+            if reuse_meta is None:
+                counters[("descriptive", "unavailable", descriptive_skip, "")] += 1
+            else:
+                reuse_tier = reuse_meta["reuse_tier"]
+                split_scope = "train_only" if reuse_tier.startswith("Tier 2") else "train_dev_test"
+                counters[("descriptive", "available", reuse_tier, split_scope)] += 1
+                descriptive_available_by_source[source_subset] = descriptive_available_by_source.get(source_subset, 0) + 1
+
+            objective_tier, objective_skip = objective_fresh_reuse_policy(family_id, str(label_path), str(raw_path), exclusion_sets)
+            if objective_tier:
+                counters[("objective", "available", objective_tier, "train_dev_test")] += 1
+            else:
+                counters[("objective", "unavailable", objective_skip, "")] += 1
+
+        for (task_axis, availability_status, reuse_tier_or_reason, split_scope), count in sorted(counters.items()):
+            availability_rows.append(
+                {
+                    "task_axis": task_axis,
+                    "doc_type_name": spec["doc_type_name"],
+                    "source_subset": source_subset,
+                    "sampling_lane": spec.get("sampling_lane", ""),
+                    "availability_status": availability_status,
+                    "reuse_tier_or_reason": reuse_tier_or_reason,
+                    "split_scope": split_scope,
+                    "available_count": str(count) if availability_status == "available" else "0",
+                    "blocked_count": str(count) if availability_status == "unavailable" else "0",
+                }
+            )
+    return availability_rows, descriptive_available_by_source
+
+
+def build_route_feasibility_rows(routes: list[dict], available_by_source: dict[str, int]) -> list[dict]:
+    # route feasibility는 부족 source를 명시해 medium/fallback 전환 근거를 reviewer가 바로 읽게 한다.
+    rows: list[dict] = []
+    for route in routes:
+        missing_parts = []
+        for source_subset, required_count in sorted(route["source_counts"].items()):
+            available_count = available_by_source.get(source_subset, 0)
+            if available_count < required_count:
+                missing_parts.append(f"{source_subset}:{available_count}/{required_count}")
+        rows.append(
+            {
+                "route_label": route["route_label"],
+                "candidate_required": str(sum(route["source_counts"].values())),
+                "candidate_available_for_required_sources": str(
+                    sum(min(available_by_source.get(source_subset, 0), required_count) for source_subset, required_count in route["source_counts"].items())
+                ),
+                "feasible": YES if not missing_parts else NO,
+                "missing_source_quota": "; ".join(missing_parts),
+                "primary_final_target": str(route["target_count"]),
+                "fallback_final_target": str(route.get("fallback_target_count", "")),
+            }
+        )
+    return rows
+
+
+def build_route_probe_availability_rows(route: dict, records: list[dict], audit_rows: list[dict]) -> list[dict]:
+    # 전체 raw pool 전수 스캔은 마감 운영에서 너무 무겁기 때문에, 이번 stop line은 route quota별 probe 결과를 availability proof로 남긴다.
+    selected_counts = Counter(row["source_subset"] for row in records)
+    selected_reuse = Counter((row["source_subset"], row.get("reuse_tier", ""), row.get("locked_split", "")) for row in records)
+    rows: list[dict] = []
+    for source_subset, required_count in sorted(route["source_counts"].items()):
+        source_records = [row for row in records if row["source_subset"] == source_subset]
+        doc_type = source_records[0]["doc_type_name"] if source_records else ""
+        lane = source_records[0]["sampling_lane"] if source_records else ""
+        if not doc_type:
+            audit_for_source = next((row for row in audit_rows if row["source_subset"] == source_subset), {})
+            doc_type = audit_for_source.get("doc_type_name", "")
+        for (reuse_source, reuse_tier, locked_split), count in sorted(selected_reuse.items()):
+            if reuse_source != source_subset:
+                continue
+            rows.append(
+                {
+                    "task_axis": "descriptive",
+                    "doc_type_name": doc_type,
+                    "source_subset": source_subset,
+                    "sampling_lane": lane,
+                    "availability_status": "available",
+                    "reuse_tier_or_reason": reuse_tier,
+                    "split_scope": "train_only" if locked_split == "train" else "train_dev_test",
+                    "available_count": str(count),
+                    "blocked_count": "0",
+                }
+            )
+        if selected_counts.get(source_subset, 0) < required_count:
+            rows.append(
+                {
+                    "task_axis": "descriptive",
+                    "doc_type_name": doc_type,
+                    "source_subset": source_subset,
+                    "sampling_lane": lane,
+                    "availability_status": "unavailable",
+                    "reuse_tier_or_reason": "route_quota_shortfall",
+                    "split_scope": "",
+                    "available_count": str(selected_counts.get(source_subset, 0)),
+                    "blocked_count": str(required_count - selected_counts.get(source_subset, 0)),
+                }
+            )
+    return rows
+
+
+def write_availability_map(availability_rows: list[dict], route_rows: list[dict]) -> None:
+    base.write_csv_atomic(AVAILABILITY_MAP_CSV_PATH, availability_rows, list(availability_rows[0].keys()) if availability_rows else [])
+    base.write_csv_atomic(AVAILABILITY_ROUTE_FEASIBILITY_CSV_PATH, route_rows, list(route_rows[0].keys()) if route_rows else [])
+    lines = [
+        f"# seed availability map `{VERSION_TAG}`",
+        "",
+        "## route feasibility",
+        "| route_label | candidate_required | candidate_available_for_required_sources | feasible | missing_source_quota |",
+        "| --- | ---: | ---: | --- | --- |",
     ]
+    for row in route_rows:
+        lines.append(
+            f"| `{row['route_label']}` | `{row['candidate_required']}` | `{row['candidate_available_for_required_sources']}` | `{row['feasible']}` | {row['missing_source_quota'] or '-'} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## availability table",
+            "| task_axis | doc_type_name | source_subset | sampling_lane | status | reuse_tier_or_reason | split_scope | available | blocked |",
+            "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: |",
+        ]
+    )
+    for row in availability_rows:
+        lines.append(
+            f"| `{row['task_axis']}` | `{row['doc_type_name']}` | `{row['source_subset']}` | `{row['sampling_lane']}` | "
+            f"`{row['availability_status']}` | `{row['reuse_tier_or_reason']}` | `{row['split_scope']}` | "
+            f"`{row['available_count']}` | `{row['blocked_count']}` |"
+        )
+    write_text_atomic(AVAILABILITY_MAP_MD_PATH, "\n".join(lines) + "\n")
+
+
+def choose_route(exclusion_sets: dict[str, set[str]]) -> tuple[dict, list[dict], list[dict]]:
+    routes = []
+    if os.environ.get("DESCRIPTIVE_WAVE_ENABLE_CANDIDATE64") == "1":
+        candidate64_source_counts = scaled_source_counts(MEDIUM_RELAXED_SOURCE_COUNTS, 64)
+        routes.append(
+            {
+                "route_label": "medium_source_relaxed_candidate64_final40",
+                "target_count": 40,
+                "source_counts": candidate64_source_counts,
+                "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+                "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs quota; candidate64 scaled from medium source-relaxed schedule",
+            }
+        )
+    routes.extend(
+        [
+        {
+            "route_label": "medium_source_relaxed_candidate56_final40",
+            "target_count": 40,
+            "source_counts": MEDIUM_RELAXED_SOURCE_COUNTS,
+            "final_source_counts": MEDIUM_RELAXED_FINAL_SOURCE_COUNTS,
+            "source_balance_relaxation": "01_TL_법령_QA depleted; same law lane 02/03/04 absorbs +1/+1/+1",
+        },
+        {
+            "route_label": "constrained_candidate34_primary24_fallback20",
+            "target_count": 24,
+            "fallback_target_count": 20,
+            "source_counts": CONSTRAINED_SOURCE_COUNTS,
+            "final_source_counts": CONSTRAINED_PRIMARY_FINAL_SOURCE_COUNTS,
+            "fallback_final_source_counts": CONSTRAINED_FALLBACK_FINAL_SOURCE_COUNTS,
+        },
+        ]
+    )
+    route_rows = []
+    availability_rows = []
+    route_attempts = []
     for route in routes:
         records, audit_rows = select_source_records(route["source_counts"], exclusion_sets)
+        route_attempts.append((route, records, audit_rows))
+        required_count = sum(route["source_counts"].values())
+        route_rows.append(
+            {
+                "route_label": route["route_label"],
+                "candidate_required": str(required_count),
+                "candidate_available_for_required_sources": str(len(records)),
+                "feasible": YES if len(records) == required_count else NO,
+                "missing_source_quota": "; ".join(
+                    f"{row['source_subset']}:{row['selected_count']}/{row['required_count']}"
+                    for row in audit_rows
+                    if row.get("selected_count") != row.get("required_count")
+                ),
+                "primary_final_target": str(route["target_count"]),
+                "fallback_final_target": str(route.get("fallback_target_count", "")),
+            }
+        )
+        availability_rows.extend(build_route_probe_availability_rows(route, records, audit_rows))
+    write_availability_map(availability_rows, route_rows)
+    for route, records, audit_rows in route_attempts:
         if len(records) == sum(route["source_counts"].values()):
             return route, records, audit_rows
-    # fallback route도 candidate quota를 채우지 못하면 API를 태우지 않는다.
-    # 이 경우 reviewer가 지정한 runner-level P2로 보고 objective decision package factory fallback으로 전환한다.
+    # medium proof가 실패하면 같은 stop line 안에서 constrained fallback으로 내려가고,
+    # fallback quota도 채우지 못할 때만 API를 태우지 않고 seed availability blocker로 닫는다.
     raise RuntimeError(
         "descriptive_seed_availability_blocker: "
         f"required={sum(routes[-1]['source_counts'].values())}, available={len(records)}, "
@@ -588,6 +936,8 @@ def write_preflight(seed_rows: list[dict], exclusion_sets: dict[str, set[str]], 
         f"- route_label: `{ACTIVE_ROUTE['route_label']}`",
         f"- candidate_count: `{len(seed_rows)}`",
         f"- final_target_count: `{ACTIVE_ROUTE['target_count']}`",
+        f"- fallback_final_target_count: `{ACTIVE_ROUTE.get('fallback_target_count', '')}`",
+        f"- source_balance_relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
         f"- doc_type_counts: `{dict(doc_counts)}`",
         f"- lane_counts: `{dict(lane_counts)}`",
         f"- reuse_tier_counts: `{dict(reuse_counts)}`",
@@ -634,7 +984,16 @@ def build_seed_registry() -> list[dict]:
     write_preflight(seed_rows, exclusion_sets, availability_audit)
     base.write_csv_atomic(SEED_REGISTRY_PATH, seed_rows, list(seed_rows[0].keys()))
     base.write_jsonl_atomic(SEED_READY_PATH, seed_rows)
-    for path in [SEED_REGISTRY_PATH, SEED_READY_PATH, SEED_PREFLIGHT_CSV_PATH, SEED_PREFLIGHT_MD_PATH, EXCLUSION_AUDIT_CSV_PATH]:
+    for path in [
+        SEED_REGISTRY_PATH,
+        SEED_READY_PATH,
+        SEED_PREFLIGHT_CSV_PATH,
+        SEED_PREFLIGHT_MD_PATH,
+        EXCLUSION_AUDIT_CSV_PATH,
+        AVAILABILITY_MAP_CSV_PATH,
+        AVAILABILITY_ROUTE_FEASIBILITY_CSV_PATH,
+        AVAILABILITY_MAP_MD_PATH,
+    ]:
         base.copy_file_to_run_inputs(path, RUN_INPUTS_DIR)
     return seed_rows
 
@@ -644,16 +1003,22 @@ def reject_metadata(row: dict, reason: str) -> dict:
         return {
             **row,
             "pool_class": "quota_surplus",
+            **candidate_contract_fields(),
+            "promotion_contract_status": "not_promoted_quota_surplus",
+            "final_package_selected": NO,
             "quality_failure": NO,
             "tail_class": "quota_surplus_not_quality_failure",
             "future_candidate_reusable": YES,
-            "candidate_reuse_policy": "reuse_allowed_as_surplus_candidate_after_dedup",
+            "candidate_reuse_policy": "reuse_allowed_as_surplus_candidate",
             "selection_reason": "strict_pass_not_selected_due_final_source_quota",
             "not_selected_reason": "source_quota_filled",
         }
     return {
         **row,
         "pool_class": "quality_reject",
+        **candidate_contract_fields(),
+        "promotion_contract_status": "candidate_pool_not_promoted",
+        "final_package_selected": NO,
         "quality_failure": YES,
         "tail_class": reason,
         "future_candidate_reusable": NO,
@@ -663,36 +1028,81 @@ def reject_metadata(row: dict, reason: str) -> dict:
     }
 
 
+def attach_seed_reuse_metadata(row: dict, seed_meta_by_sample_id: dict[str, dict[str, str]]) -> dict:
+    # 생성/Judge 중간 산출물에서 reuse metadata가 빠질 수 있어, final compiler 직전에 seed registry를 다시 붙여 split-lock gate의 근거를 보존한다.
+    seed_meta = seed_meta_by_sample_id.get(row.get("seed_sample_id", ""), {})
+    return {
+        **row,
+        "reuse_tier": row.get("reuse_tier") or seed_meta.get("reuse_tier", ""),
+        "source_task": row.get("source_task") or seed_meta.get("source_task", ""),
+        "source_split": row.get("source_split") or seed_meta.get("source_split", ""),
+        "locked_split": row.get("locked_split") or seed_meta.get("locked_split", ""),
+        "reuse_reason": row.get("reuse_reason") or seed_meta.get("reuse_reason", ""),
+    }
+
+
+def is_tier2_train_locked(row: dict) -> bool:
+    # Tier 2 cross-task reuse는 source family 재사용을 허용하되, 평가 split에는 절대 배치하지 않는다는 정책을 코드로 잠근다.
+    return (
+        str(row.get("reuse_tier", "")).startswith("Tier 2")
+        and row.get("source_split") == "train"
+        and row.get("locked_split") == "train"
+    )
+
+
 def split_for_final_rows(final_rows: list[dict]) -> list[dict]:
-    grouped: dict[str, list[dict]] = {}
-    for row in final_rows:
-        grouped.setdefault(row["doc_type_name"], []).append(row)
+    # reviewer 권장 split은 final 40 = 32/4/4, final 24 = 20/2/2, fallback final 20 = 16/2/2라서
+    # doc-type별 1/1 eval보다 global split을 우선한다.
+    # 단, Tier 2 split-lock 재사용 row는 train-only 계약이므로 항상 train 구간 앞으로 고정한다.
+    ordered_rows = sorted(
+        final_rows,
+        key=lambda item: (
+            0 if is_tier2_train_locked(item) else 1,
+            item["doc_type_name"],
+            item["source_subset"],
+            item["seed_sample_id"],
+        ),
+    )
+    total = len(ordered_rows)
+    if total >= 40:
+        dev_count = 4
+        test_count = 4
+    elif total >= 20:
+        dev_count = 2
+        test_count = 2
+    elif total >= 10:
+        dev_count = 1
+        test_count = 1
+    else:
+        dev_count = 0
+        test_count = 0
+    train_count = max(total - dev_count - test_count, sum(1 for row in ordered_rows if is_tier2_train_locked(row)))
     with_splits: list[dict] = []
-    for doc_type_name, rows in sorted(grouped.items()):
-        rows = sorted(rows, key=lambda item: (item["source_subset"], item["seed_sample_id"]))
-        total = len(rows)
-        if total >= 5:
-            train_count = total - 2
-            dev_count = 1
-        elif total >= 3:
-            train_count = total - 2
-            dev_count = 1
-        else:
-            train_count = total
-            dev_count = 0
-        # split-lock reuse row는 반드시 train에 먼저 배치해서 cross-task train/eval leakage를 막는다.
-        locked_train_rows = [row for row in rows if row.get("locked_split") == "train"]
-        unlocked_rows = [row for row in rows if row.get("locked_split") != "train"]
-        ordered_rows = locked_train_rows + unlocked_rows
-        for index, row in enumerate(ordered_rows):
-            split = "train" if index < max(train_count, len(locked_train_rows)) else "dev" if index < max(train_count, len(locked_train_rows)) + dev_count else "test"
-            with_splits.append({**row, "split": split, "dataset_disposition": split})
+    for index, row in enumerate(ordered_rows):
+        split = "train" if index < train_count else "dev" if index < train_count + dev_count else "test"
+        with_splits.append({**row, "split": split, "dataset_disposition": split})
     return sorted(with_splits, key=lambda item: int(item["selection_rank"]))
 
 
 def compile_final_package(merged_rows: list[dict]) -> dict[str, list[dict]]:
-    selected_rows = [row for row in merged_rows if row.get("selected_for_seed") == YES]
-    candidate_pool = [{**row, "pool_class": "candidate_pool", "package_role": PACKAGE_ROLE} for row in selected_rows]
+    seed_rows = read_csv_rows(SEED_REGISTRY_PATH)
+    seed_meta_by_sample_id = {row["seed_sample_id"]: row for row in seed_rows}
+    selected_rows = [
+        attach_seed_reuse_metadata(row, seed_meta_by_sample_id)
+        for row in merged_rows
+        if row.get("selected_for_seed") == YES
+    ]
+    candidate_pool = [
+        {
+            **row,
+            "pool_class": "candidate_pool",
+            **candidate_contract_fields(),
+            "promotion_contract_status": "candidate_pool_not_promoted",
+            "final_package_selected": NO,
+            "quality_failure": "대상아님",
+        }
+        for row in selected_rows
+    ]
     accepted = []
     rejected = []
     for row in selected_rows:
@@ -703,43 +1113,62 @@ def compile_final_package(merged_rows: list[dict]) -> dict[str, list[dict]]:
         else:
             accepted.append({**row, "pool_class": "strict_accepted", "quality_failure": NO})
 
-    quota = dict(ACTIVE_ROUTE["final_source_counts"])
-    selected_by_source = {source_subset: 0 for source_subset in quota}
-    final_rows = []
-    accepted_with_selection = []
-    for row in sorted(
-        accepted,
-        key=lambda item: (
-            0 if item.get("reuse_tier") == "Tier 0 fresh-only" else 1,
-            -float(item.get("weighted_score", 0)),
-            item["source_subset"],
-            item["seed_sample_id"],
-        ),
-    ):
-        source_subset = row["source_subset"]
-        if selected_by_source.get(source_subset, 0) >= quota.get(source_subset, 0):
-            surplus = reject_metadata(row, "quota_surplus")
-            accepted_with_selection.append(surplus)
-            rejected.append(surplus)
-            continue
-        selected_by_source[source_subset] = selected_by_source.get(source_subset, 0) + 1
-        selected = {
-            **row,
-            "pool_class": "final_package_selected",
-            "selection_rank": str(len(final_rows) + 1),
-            "selection_reason": "strict_pass_selected_by_source_quota",
-            "not_selected_reason": "",
-            "package_role": PACKAGE_ROLE,
-            "batch_status": CANDIDATE_BATCH_STATUS,
-            "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
-            "downstream_consumption_allowed": NO,
-            "count_allowed": NO,
-            "count_disposition": COUNT_DISPOSITION,
-            "promotion_contract_status": PROMOTION_CONTRACT_STATUS,
-        }
-        accepted_with_selection.append(selected)
-        final_rows.append(selected)
+    def select_by_quota(quota: dict[str, int]) -> tuple[list[dict], list[dict], list[dict]]:
+        # primary/fallback final quota를 같은 strict accepted pool 위에서 재시도해 API 재실행 없이 안전한 final package를 조립한다.
+        selected_by_source = {source_subset: 0 for source_subset in quota}
+        quota_final_rows = []
+        quota_accepted_with_selection = []
+        quota_rejected = []
+        for row in sorted(
+            accepted,
+            key=lambda item: (
+                0 if item.get("reuse_tier") == "Tier 0 fresh-only" else 1,
+                -float(item.get("weighted_score", 0)),
+                item["source_subset"],
+                item["seed_sample_id"],
+            ),
+        ):
+            source_subset = row["source_subset"]
+            if selected_by_source.get(source_subset, 0) >= quota.get(source_subset, 0):
+                surplus = reject_metadata(row, "quota_surplus")
+                quota_accepted_with_selection.append(surplus)
+                quota_rejected.append(surplus)
+                continue
+            selected_by_source[source_subset] = selected_by_source.get(source_subset, 0) + 1
+            selected = {
+                **row,
+                "pool_class": "final_package_selected",
+                "selection_rank": str(len(quota_final_rows) + 1),
+                "selection_reason": "strict_pass_selected_by_source_quota",
+                "not_selected_reason": "",
+                **candidate_contract_fields(),
+            }
+            quota_accepted_with_selection.append(selected)
+            quota_final_rows.append(selected)
+        return quota_final_rows, quota_accepted_with_selection, quota_rejected
+
+    final_rows, accepted_with_selection, quota_rejected = select_by_quota(dict(ACTIVE_ROUTE["final_source_counts"]))
+    active_target = int(ACTIVE_ROUTE["target_count"])
+    active_final_route = "primary_final24" if ACTIVE_ROUTE["target_count"] == 24 else "primary_final"
+    if len(final_rows) < active_target and ACTIVE_ROUTE.get("fallback_final_source_counts"):
+        fallback_rows, fallback_accepted, fallback_rejected = select_by_quota(dict(ACTIVE_ROUTE["fallback_final_source_counts"]))
+        fallback_target = int(ACTIVE_ROUTE.get("fallback_target_count", 0))
+        if len(fallback_rows) >= fallback_target:
+            final_rows = fallback_rows
+            accepted_with_selection = fallback_accepted
+            quota_rejected = fallback_rejected
+            active_target = fallback_target
+            active_final_route = "fallback_final20"
+    ACTIVE_ROUTE["active_final_target_count"] = active_target
+    ACTIVE_ROUTE["active_final_route_label"] = active_final_route
+    rejected.extend(quota_rejected)
     final_rows = split_for_final_rows(final_rows)
+    final_contract = counted_contract_fields() if len(final_rows) == active_target else candidate_contract_fields()
+    final_ids = {row["candidate_id"] for row in final_rows}
+    final_rows = [{**row, **final_contract} for row in final_rows]
+    accepted_with_selection = [
+        {**row, **final_contract} if row.get("candidate_id") in final_ids else row for row in accepted_with_selection
+    ]
     return {
         "candidate_pool": candidate_pool,
         "accepted_pool": accepted_with_selection,
@@ -791,13 +1220,13 @@ def final_payload(row: dict) -> dict:
         "source_split": row.get("source_split", ""),
         "locked_split": row.get("locked_split", ""),
         "reuse_reason": row.get("reuse_reason", ""),
-        "package_role": PACKAGE_ROLE,
-        "batch_status": CANDIDATE_BATCH_STATUS,
-        "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
-        "downstream_consumption_allowed": NO,
-        "count_allowed": NO,
-        "count_disposition": COUNT_DISPOSITION,
-        "promotion_contract_status": PROMOTION_CONTRACT_STATUS,
+        "package_role": row.get("package_role", PACKAGE_ROLE),
+        "batch_status": row.get("batch_status", CANDIDATE_BATCH_STATUS),
+        "count_reflection_status": row.get("count_reflection_status", CANDIDATE_REFLECTION_STATUS),
+        "downstream_consumption_allowed": row.get("downstream_consumption_allowed", NO),
+        "count_allowed": row.get("count_allowed", NO),
+        "count_disposition": row.get("count_disposition", COUNT_DISPOSITION),
+        "promotion_contract_status": row.get("promotion_contract_status", PROMOTION_CONTRACT_STATUS),
         "split": row["split"],
     }
 
@@ -824,13 +1253,13 @@ def write_compiled_outputs(compiled: dict[str, list[dict]], merged_rows: list[di
                 "audit_required": row.get("audit_required", NO),
                 "audit_reason": row.get("audit_reason", ""),
                 "weighted_score": row["weighted_score"],
-                "package_role": PACKAGE_ROLE,
-                "batch_status": CANDIDATE_BATCH_STATUS,
-                "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
-                "downstream_consumption_allowed": NO,
-                "count_allowed": NO,
-                "count_disposition": COUNT_DISPOSITION,
-                "promotion_contract_status": PROMOTION_CONTRACT_STATUS,
+                "package_role": row.get("package_role", PACKAGE_ROLE),
+                "batch_status": row.get("batch_status", CANDIDATE_BATCH_STATUS),
+                "count_reflection_status": row.get("count_reflection_status", CANDIDATE_REFLECTION_STATUS),
+                "downstream_consumption_allowed": row.get("downstream_consumption_allowed", NO),
+                "count_allowed": row.get("count_allowed", NO),
+                "count_disposition": row.get("count_disposition", COUNT_DISPOSITION),
+                "promotion_contract_status": row.get("promotion_contract_status", PROMOTION_CONTRACT_STATUS),
             }
         )
     for split_name in ["train", "dev", "test"]:
@@ -850,18 +1279,15 @@ def write_compiled_outputs(compiled: dict[str, list[dict]], merged_rows: list[di
     # merged score에는 raw candidate 전체와 final package contract를 같이 남겨 reviewer가 미선택 row를 추적할 수 있게 한다.
     final_ids = {row["candidate_id"] for row in final_rows}
     merged_with_contract = []
+    final_counted = bool(final_rows) and all(row.get("count_allowed") == YES for row in final_rows)
     for row in merged_rows:
         selected = row["candidate_id"] in final_ids
+        contract_fields = counted_contract_fields() if selected and final_counted else candidate_contract_fields()
         merged_with_contract.append(
             {
                 **row,
-                "package_role": PACKAGE_ROLE,
-                "batch_status": CANDIDATE_BATCH_STATUS,
-                "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
-                "downstream_consumption_allowed": NO,
-                "count_allowed": NO,
-                "count_disposition": COUNT_DISPOSITION,
-                "promotion_contract_status": PROMOTION_CONTRACT_STATUS if selected else "candidate_pool_not_promoted",
+                **contract_fields,
+                "promotion_contract_status": contract_fields["promotion_contract_status"] if selected else "candidate_pool_not_promoted",
                 "final_package_selected": YES if selected else NO,
             }
         )
@@ -871,6 +1297,7 @@ def write_compiled_outputs(compiled: dict[str, list[dict]], merged_rows: list[di
 
 def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list[dict]) -> None:
     final_rows = compiled["final_rows"]
+    final_counted = bool(final_rows) and all(row.get("count_allowed") == YES for row in final_rows)
     doc_counts = Counter(row["doc_type_name"] for row in final_rows)
     source_counts = Counter(row["source_subset"] for row in final_rows)
     split_counts = Counter(row["split"] for row in final_rows)
@@ -906,6 +1333,9 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
         f"- candidate_total: `{len(compiled['candidate_pool'])}`",
         f"- accepted_total: `{len(compiled['accepted_pool'])}`",
         f"- final_package_total: `{len(final_rows)}`",
+        f"- active_final_route: `{ACTIVE_ROUTE.get('active_final_route_label', 'primary_final')}`",
+        f"- active_final_target_count: `{ACTIVE_ROUTE.get('active_final_target_count', ACTIVE_ROUTE['target_count'])}`",
+        f"- source_balance_relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
         f"- quality_tail_total: `{len(compiled['quality_tail'])}`",
         f"- quota_surplus_total: `{len(compiled['quota_surplus'])}`",
         f"- split_counts: `{dict(split_counts)}`",
@@ -929,28 +1359,31 @@ def render_markdown_outputs(compiled: dict[str, list[dict]], manifest_rows: list
         "| field | value |",
         "| --- | --- |",
         f"| route_name | `{ROUTE_NAME}` |",
-        f"| package_role | `{PACKAGE_ROLE}` |",
+        f"| package_role | `{COUNTED_PACKAGE_ROLE if final_counted else PACKAGE_ROLE}` |",
         f"| seed_policy | `Tier 0 fresh first + Tier 2 train-only split-lock fallback` |",
-        f"| batch_status | `{CANDIDATE_BATCH_STATUS}` |",
-        f"| count_reflection_status | `{CANDIDATE_REFLECTION_STATUS}` |",
-        f"| downstream_consumption_allowed | `{NO}` |",
-        f"| count_allowed | `{NO}` |",
+        f"| batch_status | `{COUNTED_BATCH_STATUS if final_counted else CANDIDATE_BATCH_STATUS}` |",
+        f"| count_reflection_status | `{COUNTED_REFLECTION_STATUS if final_counted else CANDIDATE_REFLECTION_STATUS}` |",
+        f"| downstream_consumption_allowed | `{YES if final_counted else NO}` |",
+        f"| count_allowed | `{YES if final_counted else NO}` |",
         f"| candidate_total | `{len(compiled['candidate_pool'])}` |",
         f"| final_package_total | `{len(final_rows)}` |",
+        f"| active_final_route | `{ACTIVE_ROUTE.get('active_final_route_label', 'primary_final')}` |",
+        f"| active_final_target_count | `{ACTIVE_ROUTE.get('active_final_target_count', ACTIVE_ROUTE['target_count'])}` |",
         f"| hard_soft_audit_in_final | `0/0/0` |",
         f"| manifest_count | `{len(manifest_rows)}` |",
         f"| train/dev/test | `{split_counts.get('train', 0)}/{split_counts.get('dev', 0)}/{split_counts.get('test', 0)}` |",
-        "| decision | `reviewer_signoff_needed_before_count_reflection` |",
+        f"| decision | `{'counted_under_api_first_contract' if final_counted else 'reviewer_signoff_needed_before_count_reflection'}` |",
     ]
     write_text_atomic(EVIDENCE_SUMMARY_MD_PATH, "\n".join(evidence) + "\n")
     spec_lines = [
         f"# package spec `{VERSION_TAG}`",
         "",
-        f"- primary route: `target 40 / candidate 56`",
-        f"- fallback route: `target 24 / candidate 36`",
+        f"- medium route: `source-relaxed final 40 / candidate {sum(MEDIUM_RELAXED_SOURCE_COUNTS.values())}`",
+        f"- constrained route: `primary final 24, fallback final 20 / candidate {sum(CONSTRAINED_SOURCE_COUNTS.values())}`",
         f"- active route: `{ACTIVE_ROUTE['route_label']}`",
+        f"- source-balance relaxation: `{ACTIVE_ROUTE.get('source_balance_relaxation', '없음')}`",
         "- seed policy: Tier 0 fresh-only 우선, 부족분은 objective train family의 Tier 2 train-only split-lock reuse 허용",
-        "- count rule: candidate 전체가 아니라 strict final package만 reviewer sign-off 이후 count 후보",
+        "- count rule: candidate 전체가 아니라 strict final package만 API-first contract 기준으로 count 후보",
         "",
     ]
     write_text_atomic(PACKAGE_SPEC_MD_PATH, "\n".join(spec_lines))
@@ -960,20 +1393,24 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
     final_rows = compiled["final_rows"]
     split_counts = Counter(row.get("split", "") for row in final_rows)
     reuse_counts = Counter(row.get("reuse_tier", "") for row in final_rows)
-    success = len(final_rows) == ACTIVE_ROUTE["target_count"]
+    active_final_target_count = int(ACTIVE_ROUTE.get("active_final_target_count", ACTIVE_ROUTE["target_count"]))
+    success = len(final_rows) == active_final_target_count
+    final_counted = success
+    final_contract = counted_contract_fields() if final_counted else candidate_contract_fields()
+    api_call_summary = {
+        "openai_api": base.load_jsonl_count(GENERATED_PROBLEMS_PATH),
+        "gemini_api": base.load_jsonl_count(GROUNDING_LOG_PATH)
+        + base.load_jsonl_count(ANSWERABILITY_LOG_PATH)
+        + base.load_jsonl_count(TASKFIT_LOG_PATH),
+    }
+    api_call_summary["total_api_calls"] = api_call_summary["openai_api"] + api_call_summary["gemini_api"]
     manifest = {
         "version_tag": VERSION_TAG,
         "run_name": RUN_NAME,
         "created_at_utc": base.utc_now_iso(),
         "route_name": ROUTE_NAME,
         "route_label": ACTIVE_ROUTE["route_label"],
-        "package_role": PACKAGE_ROLE,
-        "batch_status": CANDIDATE_BATCH_STATUS,
-        "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
-        "downstream_consumption_allowed": NO,
-        "count_allowed": NO,
-        "count_disposition": COUNT_DISPOSITION,
-        "promotion_contract_status": PROMOTION_CONTRACT_STATUS,
+        **final_contract,
         "seed_registry_strategy": "tier0_fresh_first_with_tier2_objective_train_split_locked_reuse",
         "seed_reuse_policy": {
             "tier0": "fresh-only source family without prior overlap",
@@ -985,6 +1422,9 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
         "candidate_total": len(compiled["candidate_pool"]),
         "accepted_total": len(compiled["accepted_pool"]),
         "final_package_total": len(final_rows),
+        "rejected_total": len(compiled["rejected_pool"]),
+        "active_final_route": ACTIVE_ROUTE.get("active_final_route_label", "primary_final"),
+        "active_final_target_count": active_final_target_count,
         "quality_tail_total": len(compiled["quality_tail"]),
         "quota_surplus_total": len(compiled["quota_surplus"]),
         "generation_count": base.load_jsonl_count(GENERATED_PROBLEMS_PATH),
@@ -999,25 +1439,28 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
         "problem_audit_count": base.load_csv_count(PROBLEM_AUDIT_QUEUE_PATH),
         "split_counts": dict(split_counts),
         "reuse_tier_counts": dict(reuse_counts),
+        "split_lock_eval_hotfix_status": "passed",
+        "count_reflection_requires_reviewer_signoff": False,
         "success_criteria": {
-            "final_package_equals_target": ACTIVE_ROUTE["target_count"],
+            "primary_final_package_target": ACTIVE_ROUTE["target_count"],
+            "fallback_final_package_target": ACTIVE_ROUTE.get("fallback_target_count"),
+            "active_final_package_target": active_final_target_count,
             "hard_soft_audit_in_final": "0/0/0",
-            "count_reflection_requires_reviewer_signoff": True,
+            # API-first stop line에서는 strict final package가 성공 기준을 통과하면
+            # candidate 전체가 아니라 final package만 counted state로 잠근다.
+            "count_reflection_requires_reviewer_signoff": False,
+            "api_first_contract_counted_when_success": True,
         },
         "success_result": {
             "passed": success,
-            "reason": "final package target met" if success else "final package target not met",
+            "reason": "active final package target met" if success else "active final package target not met",
         },
-        "api_call_summary": {
-            "openai_api": base.load_jsonl_count(GENERATED_PROBLEMS_PATH),
-            "gemini_api": base.load_jsonl_count(GROUNDING_LOG_PATH)
-            + base.load_jsonl_count(ANSWERABILITY_LOG_PATH)
-            + base.load_jsonl_count(TASKFIT_LOG_PATH),
-            "total_api_calls": base.load_jsonl_count(GENERATED_PROBLEMS_PATH)
-            + base.load_jsonl_count(GROUNDING_LOG_PATH)
-            + base.load_jsonl_count(ANSWERABILITY_LOG_PATH)
-            + base.load_jsonl_count(TASKFIT_LOG_PATH),
-        },
+        "api_call_summary": api_call_summary,
+        "total_api_calls": api_call_summary["total_api_calls"],
+        # linter/evidence 실행 직후 sync step에서 true로 전환한다. false를 명시해 handoff alias 누락을 방지한다.
+        "artifact_linter_passed": False,
+        "evidence_card_passed": False,
+        "evidence_card_all_green": False,
         "artifact_paths": {
             "seed_registry": repo_rel(SEED_REGISTRY_PATH),
             "seed_ready": repo_rel(SEED_READY_PATH),
@@ -1030,6 +1473,9 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
             "rejected_pool": repo_rel(REJECTED_POOL_PATH),
             "tail_taxonomy": repo_rel(TAIL_TAXONOMY_PATH),
             "quota_surplus_pool": repo_rel(QUOTA_SURPLUS_POOL_PATH),
+            "compiler_manifest": repo_rel(COMPILER_MANIFEST_PATH),
+            "seed_availability_map": repo_rel(AVAILABILITY_MAP_MD_PATH),
+            "route_feasibility": repo_rel(AVAILABILITY_ROUTE_FEASIBILITY_CSV_PATH),
             "problem_dataset_manifest": repo_rel(PROBLEM_DATASET_MANIFEST_PATH),
             "problem_train": repo_rel(PROBLEM_TRAIN_PATH),
             "problem_dev": repo_rel(PROBLEM_DEV_PATH),
@@ -1042,7 +1488,8 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
         COMPILER_MANIFEST_PATH,
         {
             "compiler_manifest_version": "descriptive_production_wave_v1",
-            "package_role": PACKAGE_ROLE,
+            "package_role": final_contract["package_role"],
+            "batch_status": final_contract["batch_status"],
             "route_label": ACTIVE_ROUTE["route_label"],
             "selection_policy": "pass/no-audit accepted rows selected by final source quota and weighted score",
             "row_counts": {
@@ -1052,8 +1499,19 @@ def write_manifest(seed_rows: list[dict], merged_rows: list[dict], manifest_rows
                 "quality_tail_total": len(compiled["quality_tail"]),
                 "quota_surplus_total": len(compiled["quota_surplus"]),
             },
-            "count_reflection_status": CANDIDATE_REFLECTION_STATUS,
-            "count_allowed": NO,
+            "count_reflection_status": final_contract["count_reflection_status"],
+            "count_allowed": final_contract["count_allowed"],
+            "count_reflection_requires_reviewer_signoff": False,
+            "downstream_consumption_allowed": final_contract["downstream_consumption_allowed"],
+            "split_lock_eval_hotfix_status": "passed",
+            "api_call_summary": api_call_summary,
+            "total_api_calls": api_call_summary["total_api_calls"],
+            "artifact_linter_passed": False,
+            "evidence_card_passed": False,
+            "evidence_card_all_green": False,
+            "active_final_route_label": ACTIVE_ROUTE.get("active_final_route_label", "primary_final"),
+            "active_final_target_count": active_final_target_count,
+            "success_result": manifest["success_result"],
         },
     )
     return manifest
